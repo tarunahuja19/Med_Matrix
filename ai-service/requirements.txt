@@ -1,8 +1,6 @@
 fastapi
 uvicorn[standard]
 numpy
-torch
-torchvision
 h5py
 SimpleITK
 scikit-image
