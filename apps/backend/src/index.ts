@@ -1,6 +1,9 @@
 import 'dotenv/config'
 import express from 'express'
 import { PrismaClient } from '@prisma/client'
+import { initBuckets } from './storage'
+
+
 
 const app = express()
 const prisma = new PrismaClient()
@@ -27,6 +30,8 @@ app.get('/reports', async (req, res) => {
   res.json(reports)
 })
 
-app.listen(PORT, () => {
+
+app.listen(PORT, async () => {
+  await initBuckets()
   console.log(`Backend running on http://localhost:${PORT}`)
 })
