@@ -30,10 +30,15 @@ services:
     command: server /data --console-address ":9001"
     env_file: .env
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "9002:9000"
+      - "9003:9001"
     volumes:
       - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   ai-service:
     build: ./ai-service
@@ -46,9 +51,47 @@ services:
       MINIO_SECRET_KEY: minioadmin123
       MINIO_SECURE: "false"
     volumes:
-      - ./ai-service:/app
+      - ./ai-service:/app           # hot-reload: live code mount
     depends_on:
-      - minio
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile.dev
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://kvision:kvision_secret@postgres:5432/kvision_db?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin123
+      MINIO_SECURE: "false"
+      AI_SERVICE_URL: http://ai-service:8000
+      PORT: "3000"
+    volumes:
+      - ./apps/backend/src:/app/apps/backend/src   # hot-reload: live source mount
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   postgres_data:

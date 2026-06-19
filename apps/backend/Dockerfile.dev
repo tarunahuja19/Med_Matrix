@@ -1,0 +1,34 @@
+FROM node:22-slim
+
+# Install OpenSSL (required by Prisma query engine on Debian slim)
+RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
+
+# Install pnpm via npm (avoids corepack semver-range issue with devEngines)
+RUN npm install -g pnpm@11.5.2
+
+WORKDIR /app
+
+# Copy workspace manifests first for better layer caching
+COPY pnpm-workspace.yaml ./
+COPY package.json ./
+COPY pnpm-lock.yaml ./
+COPY apps/backend/package.json ./apps/backend/
+
+# Install all dependencies (ignore-workspace-root-check because root has "type":"module")
+RUN pnpm install --no-frozen-lockfile
+
+# Copy prisma schema and generate client
+COPY apps/backend/prisma ./apps/backend/prisma
+RUN pnpm --filter backend exec prisma generate
+
+# Copy source (will be overridden by volume mount in dev)
+COPY apps/backend/src ./apps/backend/src
+COPY apps/backend/tsconfig.json ./apps/backend/
+COPY apps/backend/nodemon.json ./apps/backend/
+
+WORKDIR /app/apps/backend
+
+EXPOSE 3000
+
+# Hot-reload via nodemon + ts-node
+CMD ["pnpm", "dev"]

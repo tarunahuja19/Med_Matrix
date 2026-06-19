@@ -1,11 +1,17 @@
 import * as Minio from 'minio'
 
+// Parse endpoint – supports "host:port" or just "host"
+const minioEndpointRaw = process.env.MINIO_ENDPOINT ?? 'localhost:9000'
+const [minioHost, minioPortStr] = minioEndpointRaw.includes(':')
+  ? minioEndpointRaw.split(':')
+  : [minioEndpointRaw, '9000']
+
 export const minioClient = new Minio.Client({
-  endPoint: 'localhost',
-  port: 9000,
-  useSSL: false,
-  accessKey: 'minioadmin',
-  secretKey: 'minioadmin123'
+  endPoint: minioHost,
+  port: Number(minioPortStr),
+  useSSL: process.env.MINIO_SECURE === 'true',
+  accessKey: process.env.MINIO_ACCESS_KEY ?? 'minioadmin',
+  secretKey: process.env.MINIO_SECRET_KEY ?? 'minioadmin123',
 })
 
 const BUCKETS = [
