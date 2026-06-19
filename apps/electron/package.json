@@ -2,12 +2,29 @@
   "name": "electron",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "out/main/index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev:renderer": "vite",
+    "dev:main": "tsc -p tsconfig.main.json && electron out/main/index.js",
+    "dev": "concurrently \"pnpm dev:renderer\" \"pnpm dev:main\""
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "module"
+  "dependencies": {
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.3",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "4.3.1",
+    "concurrently": "^10.0.3",
+    "electron": "^42.4.0",
+    "electron-builder": "^26.15.3",
+    "ts-node": "^10.9.2",
+    "typescript": "^6.0.3",
+    "vite": "5.4.0"
+  }
 }
