@@ -23,16 +23,19 @@ model Patient {
 }
 
 model Study {
-  id          String    @id @default(uuid())
-  patientId   String
-  patient     Patient   @relation(fields: [patientId], references: [id])
-  modality    String    // MRI, CT etc
-  studyDate   DateTime
-  status      String    @default("pending") // pending, processing, complete
-  dicomKey    String?   // MinIO object key for the raw DICOM file
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  reports     Report[]
+  id               String             @id @default(uuid())
+  patientId        String
+  patient          Patient            @relation(fields: [patientId], references: [id])
+  modality         String             // MRI, CT etc
+  studyDate        DateTime
+  status           String             @default("pending") // pending, processing, complete, failed
+  dicomKey         String?            // MinIO object key for the raw DICOM file
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  reports          Report[]
+  modelResults     ModelResult[]      // Phase 2: raw model outputs
+  anomalyDetections AnomalyDetection[] // Phase 2: K-Space anomaly records
+  gatingDecisions  GatingDecision[]   // Phase 2: gating decisions per inference run
 }
 
 model Report {
@@ -44,4 +47,85 @@ model Report {
   status      String    @default("draft") // draft, final
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 — AI Model Result Tables
+// ---------------------------------------------------------------------------
+
+/// Stores raw output from a single AI model inference run.
+/// Each inference call against a study produces one ModelResult row.
+model ModelResult {
+  id                String            @id @default(uuid())
+  studyId           String
+  study             Study             @relation(fields: [studyId], references: [id])
+
+  /// Which model produced this result (e.g. "kspace-anomaly", "image-encoder")
+  modelName         String
+
+  /// Version tag of the model (e.g. "v1.0.0", "phase2-20240618")
+  modelVersion      String            @default("v1")
+
+  /// Raw scores / output as JSON string (e.g. {"ghosting": 0.72, "wrap_around": 0.34})
+  rawScores         String
+
+  /// Overall composite confidence score [0, 1]
+  confidenceScore   Float
+
+  /// MinIO key for the reconstructed image produced by this run (nullable when gated out)
+  reconstructedKey  String?
+
+  createdAt         DateTime          @default(now())
+  anomalyDetection  AnomalyDetection?
+  gatingDecision    GatingDecision?
+}
+
+/// Records K-Space anomaly detection result for a study inference run.
+model AnomalyDetection {
+  id              String      @id @default(uuid())
+  studyId         String
+  study           Study       @relation(fields: [studyId], references: [id])
+
+  /// Back-link to the ModelResult that produced this anomaly detection
+  modelResultId   String      @unique
+  modelResult     ModelResult @relation(fields: [modelResultId], references: [id])
+
+  /// Individual artifact probability scores [0, 1]
+  ghostingScore   Float
+  wrapAroundScore Float
+  zipperScore     Float
+
+  /// Max of the three individual scores (used for gating)
+  compositeScore  Float
+
+  /// True when compositeScore >= threshold at the time of inference
+  anomalyDetected Boolean
+
+  /// Threshold applied for this run
+  threshold       Float
+
+  createdAt       DateTime    @default(now())
+}
+
+/// Records the gating decision made after K-Space anomaly detection.
+/// Controls whether the SwinTransformer Image Encoder was triggered.
+model GatingDecision {
+  id                     String      @id @default(uuid())
+  studyId                String
+  study                  Study       @relation(fields: [studyId], references: [id])
+
+  /// Back-link to the ModelResult that produced this gating decision
+  modelResultId          String      @unique
+  modelResult            ModelResult @relation(fields: [modelResultId], references: [id])
+
+  /// True when anomaly_score >= threshold (image encoder was triggered)
+  imageEncoderTriggered  Boolean
+
+  /// Confidence value at the time of gating (= compositeScore)
+  confidence             Float
+
+  /// Human-readable reason for the gating decision
+  reason                 String
+
+  createdAt              DateTime    @default(now())
 }

@@ -1,0 +1,158 @@
+/**
+ * ai-client.ts — Phase 2 Node.js AI-service bridge
+ *
+ * Responsibilities:
+ *  1. POST to FastAPI /predict with study + K-space info
+ *  2. Parse the PredictResponse (anomaly scores + gating decision)
+ *  3. Persist ModelResult, AnomalyDetection, and GatingDecision rows via Prisma
+ *
+ * Tech: Axios, Prisma
+ */
+
+import axios, { AxiosInstance } from 'axios'
+import { PrismaClient } from '@prisma/client'
+
+const prisma = new PrismaClient()
+
+// ---------------------------------------------------------------------------
+// Request / Response type mirrors (matches ai-service/models.py)
+// ---------------------------------------------------------------------------
+
+export interface PredictRequest {
+  study_id: string
+  kspace_key: string
+  anomaly_threshold?: number   // default 0.5
+  phase_correction?: boolean   // default true
+  denoise_method?: string      // default "nlm"
+}
+
+export interface AnomalyScore {
+  ghosting: number
+  wrap_around: number
+  zipper_noise: number
+  composite_score: number
+}
+
+export interface GatingDecisionPayload {
+  anomaly_detected: boolean
+  confidence: number
+  threshold_used: number
+  image_encoder_triggered: boolean
+  reason: string
+}
+
+export interface PredictResponse {
+  status: string
+  study_id: string
+  anomaly_scores: AnomalyScore
+  gating_decision: GatingDecisionPayload
+  reconstructed_key: string | null
+  artifact_report: Record<string, number> | null
+  message: string | null
+}
+
+// ---------------------------------------------------------------------------
+// Stored result shape returned to the caller (worker.ts)
+// ---------------------------------------------------------------------------
+export interface AIInferenceResult {
+  modelResultId: string
+  anomalyDetected: boolean
+  confidence: number
+  imageEncoderTriggered: boolean
+  reconstructedKey: string | null
+  artifactReport: Record<string, number> | null
+}
+
+// ---------------------------------------------------------------------------
+// AI Client class
+// ---------------------------------------------------------------------------
+
+export class AIServiceClient {
+  private readonly http: AxiosInstance
+
+  constructor(baseURL?: string) {
+    this.http = axios.create({
+      baseURL: baseURL ?? process.env.AI_SERVICE_URL ?? 'http://localhost:8000',
+      timeout: 120_000, // 2 min — inference can be slow on large MRIs
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+
+  /**
+   * Run K-Space anomaly detection + gating on a study.
+   * Persists ModelResult, AnomalyDetection and GatingDecision to the DB.
+   *
+   * @returns AIInferenceResult with key IDs and gating outcome
+   * @throws on HTTP error or DB failure
+   */
+  async predict(req: PredictRequest): Promise<AIInferenceResult> {
+    // ── 1. Call /predict on the FastAPI AI-service ─────────────────────────
+    let data: PredictResponse
+    try {
+      const res = await this.http.post<PredictResponse>('/predict', {
+        study_id: req.study_id,
+        kspace_key: req.kspace_key,
+        anomaly_threshold: req.anomaly_threshold ?? 0.5,
+        phase_correction: req.phase_correction ?? true,
+        denoise_method: req.denoise_method ?? 'nlm',
+      })
+      data = res.data
+    } catch (err: unknown) {
+      const msg = axios.isAxiosError(err)
+        ? `AI-service /predict failed [${err.response?.status}]: ${JSON.stringify(err.response?.data)}`
+        : `AI-service /predict network error: ${String(err)}`
+      throw new Error(msg)
+    }
+
+    const { anomaly_scores, gating_decision, reconstructed_key, artifact_report } = data
+
+    // ── 2. Persist ModelResult ──────────────────────────────────────────────
+    const modelResult = await prisma.modelResult.create({
+      data: {
+        studyId: req.study_id,
+        modelName: 'kspace-anomaly',
+        modelVersion: 'v1',
+        rawScores: JSON.stringify(anomaly_scores),
+        confidenceScore: anomaly_scores.composite_score,
+        reconstructedKey: reconstructed_key ?? null,
+      },
+    })
+
+    // ── 3. Persist AnomalyDetection ────────────────────────────────────────
+    await prisma.anomalyDetection.create({
+      data: {
+        studyId: req.study_id,
+        modelResultId: modelResult.id,
+        ghostingScore: anomaly_scores.ghosting,
+        wrapAroundScore: anomaly_scores.wrap_around,
+        zipperScore: anomaly_scores.zipper_noise,
+        compositeScore: anomaly_scores.composite_score,
+        anomalyDetected: gating_decision.anomaly_detected,
+        threshold: gating_decision.threshold_used,
+      },
+    })
+
+    // ── 4. Persist GatingDecision ──────────────────────────────────────────
+    await prisma.gatingDecision.create({
+      data: {
+        studyId: req.study_id,
+        modelResultId: modelResult.id,
+        imageEncoderTriggered: gating_decision.image_encoder_triggered,
+        confidence: gating_decision.confidence,
+        reason: gating_decision.reason,
+      },
+    })
+
+    return {
+      modelResultId: modelResult.id,
+      anomalyDetected: gating_decision.anomaly_detected,
+      confidence: gating_decision.confidence,
+      imageEncoderTriggered: gating_decision.image_encoder_triggered,
+      reconstructedKey: reconstructed_key ?? null,
+      artifactReport: artifact_report ?? null,
+    }
+  }
+}
+
+// Singleton export so worker and routes share one instance
+export const aiClient = new AIServiceClient()

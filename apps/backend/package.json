@@ -11,6 +11,7 @@
   "license": "ISC",
   "dependencies": {
     "@prisma/client": "5.22.0",
+    "axios": "^1.7.9",
     "bullmq": "^5.78.1",
     "dcmjs": "^0.52.0",
     "dotenv": "^17.4.2",

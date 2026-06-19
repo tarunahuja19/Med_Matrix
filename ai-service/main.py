@@ -12,6 +12,14 @@ from denoiser import denoise_image
 from artifact_detector import detect_artifacts
 import numpy as np
 
+# Phase 2 — Pydantic schemas for /predict
+from models import (
+    PredictRequest,
+    PredictResponse,
+    AnomalyScore,
+    GatingDecision,
+)
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ai-service")
@@ -184,4 +192,162 @@ def reconstruct(request: ReconstructRequest):
             study_id=request.study_id,
             reconstructed_key=request.reconstructed_key,
             artifact_report=artifact_report
+        )
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — /predict
+# K-Space anomaly detection + gating logic
+#
+# Flow:
+#   1. Download raw K-space from MinIO
+#   2. Load + reconstruct (IFFT + phase correction)
+#   3. Compute artifact / anomaly scores via detect_artifacts()
+#   4. Derive composite_score = max(ghosting, wrap_around, zipper_noise)
+#   5. Apply gating: anomaly_detected = composite_score >= threshold
+#   6. If anomaly_detected → run full pipeline (motion correction, denoise,
+#      upload) and populate reconstructed_key + artifact_report
+#   7. Return PredictResponse
+# ---------------------------------------------------------------------------
+
+@app.post("/predict", response_model=PredictResponse)
+def predict(request: PredictRequest):
+    """K-Space anomaly detection with gating logic for Phase 2."""
+    if minio_client is None:
+        raise HTTPException(status_code=503, detail="MinIO client not configured or connected")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        _, ext = os.path.splitext(request.kspace_key)
+        local_kspace_path = os.path.join(tmpdir, f"kspace_input{ext}")
+
+        # ── Step 1: Download raw K-space ───────────────────────────────────
+        try:
+            logger.info(f"[predict] Downloading {request.kspace_key} from 'kspace-raw'...")
+            minio_client.fget_object(
+                bucket_name="kspace-raw",
+                object_name=request.kspace_key,
+                file_path=local_kspace_path,
+            )
+        except Exception as e:
+            logger.error(f"[predict] Failed to download kspace: {e}")
+            raise HTTPException(
+                status_code=404,
+                detail=f"Failed to retrieve K-space file '{request.kspace_key}': {e}",
+            )
+
+        # ── Step 2: Load K-space ───────────────────────────────────────────
+        try:
+            logger.info("[predict] Loading K-space data...")
+            kspace = load_kspace(local_kspace_path)
+            logger.info(f"[predict] K-space shape: {kspace.shape}")
+        except Exception as e:
+            logger.error(f"[predict] Failed to parse K-space: {e}")
+            raise HTTPException(status_code=422, detail=f"Failed to parse K-space file: {e}")
+
+        # ── Step 3: Reconstruct (IFFT + phase correction) ─────────────────
+        try:
+            logger.info("[predict] Performing IFFT reconstruction for anomaly scoring...")
+            reconstructed = reconstruct_kspace(kspace, phase_correction=request.phase_correction)
+        except Exception as e:
+            logger.error(f"[predict] Reconstruction failed: {e}")
+            raise HTTPException(status_code=500, detail=f"Reconstruction failed: {e}")
+
+        # ── Step 4: Compute anomaly / artifact scores ──────────────────────
+        try:
+            logger.info("[predict] Computing anomaly scores...")
+            if reconstructed.ndim == 3:
+                scan_slice = np.mean(reconstructed, axis=0)
+            elif reconstructed.ndim == 4:
+                scan_slice = np.mean(reconstructed, axis=(0, 1))
+            else:
+                scan_slice = reconstructed
+
+            raw_scores = detect_artifacts(scan_slice)
+            ghosting_score = float(raw_scores["ghosting"])
+            wrap_score = float(raw_scores["wrap_around"])
+            zipper_score = float(raw_scores["zipper_noise"])
+            composite = max(ghosting_score, wrap_score, zipper_score)
+
+            anomaly_scores = AnomalyScore(
+                ghosting=ghosting_score,
+                wrap_around=wrap_score,
+                zipper_noise=zipper_score,
+                composite_score=composite,
+            )
+            logger.info(f"[predict] Anomaly scores: {raw_scores} | composite={composite:.4f}")
+        except Exception as e:
+            logger.error(f"[predict] Anomaly scoring failed: {e}")
+            raise HTTPException(status_code=500, detail=f"Anomaly scoring failed: {e}")
+
+        # ── Step 5: Gating decision ────────────────────────────────────────
+        anomaly_detected = composite >= request.anomaly_threshold
+        image_encoder_triggered = anomaly_detected
+
+        if anomaly_detected:
+            reason = (
+                f"Composite anomaly score {composite:.4f} >= threshold {request.anomaly_threshold:.4f}. "
+                "Image encoder pipeline triggered."
+            )
+        else:
+            reason = (
+                f"Composite anomaly score {composite:.4f} < threshold {request.anomaly_threshold:.4f}. "
+                "Image encoder skipped — K-Space clean."
+            )
+
+        logger.info(f"[predict] Gating: anomaly_detected={anomaly_detected} | reason: {reason}")
+
+        gating = GatingDecision(
+            anomaly_detected=anomaly_detected,
+            confidence=composite,
+            threshold_used=request.anomaly_threshold,
+            image_encoder_triggered=image_encoder_triggered,
+            reason=reason,
+        )
+
+        # ── Step 6 (conditional): Full pipeline if anomaly detected ────────
+        reconstructed_key: str | None = None
+        artifact_report: dict | None = None
+
+        if anomaly_detected:
+            logger.info("[predict] Anomaly detected — running full image pipeline...")
+            local_reconstructed_path = os.path.join(tmpdir, "reconstructed.npy")
+            reconstructed_key = f"{request.study_id}/reconstructed.npy"
+
+            try:
+                corrected = correct_motion(reconstructed)
+                denoised = denoise_image(corrected, method=request.denoise_method)
+
+                # Artifact report on denoised image
+                if denoised.ndim == 3:
+                    artifact_img = np.mean(denoised, axis=0)
+                elif denoised.ndim == 4:
+                    artifact_img = np.mean(denoised, axis=(0, 1))
+                else:
+                    artifact_img = denoised
+
+                artifact_report = detect_artifacts(artifact_img)
+
+                # Upload to MinIO
+                np.save(local_reconstructed_path, denoised)
+                minio_client.fput_object(
+                    bucket_name="reconstructed",
+                    object_name=reconstructed_key,
+                    file_path=local_reconstructed_path,
+                )
+                logger.info(f"[predict] Reconstructed image uploaded: {reconstructed_key}")
+            except Exception as e:
+                logger.error(f"[predict] Image pipeline failed: {e}")
+                # Non-fatal: return gating result even if image pipeline fails
+                artifact_report = {"error": str(e)}
+                reconstructed_key = None
+
+        # ── Step 7: Return response ────────────────────────────────────────
+        return PredictResponse(
+            status="success",
+            study_id=request.study_id,
+            anomaly_scores=anomaly_scores,
+            gating_decision=gating,
+            reconstructed_key=reconstructed_key,
+            artifact_report=artifact_report,
+            message=reason,
         )
