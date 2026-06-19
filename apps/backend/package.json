@@ -11,12 +11,15 @@
   "license": "ISC",
   "dependencies": {
     "@prisma/client": "5.22.0",
+    "dcmjs": "^0.52.0",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "minio": "^8.0.7"
+    "minio": "^8.0.7",
+    "multer": "^2.2.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
+    "@types/multer": "^2.1.0",
     "@types/node": "^25.9.3",
     "nodemon": "^3.1.14",
     "prisma": "5.22.0",

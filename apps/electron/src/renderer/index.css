@@ -1,0 +1,232 @@
+/* Clinical vintage MRI workstation style system */
+@import url('https://fonts.googleapis.com/css2?family=Courier+Prime:ital,wght@0,400;0,700;1,400;1,700&family=JetBrains+Mono:wght@300;400;500;700&family=Outfit:wght@300;400;500;600;700&display=swap');
+
+:root {
+  --color-bg-base: #d9dfe4;
+  --color-panel-bg: #ebeeef;
+  --color-panel-border: #7f8e9c;
+  --color-text-main: #1b262c;
+  --color-text-dim: #5c6c77;
+  --color-accent-blue: #326084;
+  --color-accent-green: #2b704c;
+  --color-accent-amber: #b96c14;
+  --color-accent-red: #a82e2e;
+  --color-light-glow: #eef2f5;
+  --font-mono: 'JetBrains Mono', 'Courier New', Courier, monospace;
+  --font-sans: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--color-bg-base);
+  color: var(--color-text-main);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  overflow: hidden;
+  height: 100vh;
+  user-select: none;
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+::-webkit-scrollbar-track {
+  background: #ccd4da;
+  border-left: 1px solid var(--color-panel-border);
+}
+::-webkit-scrollbar-thumb {
+  background: #a4b2be;
+  border: 2px solid #ccd4da;
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #8e9ea9;
+}
+
+/* Vintage relief borders */
+.bevel-inset {
+  border: 2px solid;
+  border-color: #8898a5 #ffffff #ffffff #8898a5;
+}
+
+.bevel-outset {
+  border: 2px solid;
+  border-color: #ffffff #8898a5 #8898a5 #ffffff;
+}
+
+/* Siemens Syngo style grid layout */
+.syngo-layout {
+  display: grid;
+  grid-template-rows: 40px 1fr 24px;
+  height: 100vh;
+}
+
+.syngo-header {
+  background-color: #c9d2d8;
+  border-bottom: 2px solid var(--color-panel-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  font-family: var(--font-mono);
+  font-weight: bold;
+}
+
+.syngo-workspace {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 8px;
+  padding: 8px;
+  overflow: hidden;
+}
+
+.syngo-panel {
+  background-color: var(--color-panel-bg);
+  border: 1px solid var(--color-panel-border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.panel-header {
+  background-color: #d1dadf;
+  border-bottom: 1px solid var(--color-panel-border);
+  padding: 6px 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-accent-blue);
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.panel-body {
+  padding: 12px;
+  flex: 1;
+  overflow-y: auto;
+}
+
+/* Utilitarian buttons */
+.clinical-btn {
+  background: linear-gradient(to bottom, #f3f6f7, #dee3e6);
+  border: 1px solid var(--color-panel-border);
+  color: var(--color-text-main);
+  padding: 8px 16px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.1s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.clinical-btn:hover {
+  background: linear-gradient(to bottom, #ffffff, #e6ebed);
+  border-color: #5c6c77;
+}
+
+.clinical-btn:active {
+  background: #d6dbe0;
+  box-shadow: inset 1px 1px 2px rgba(0,0,0,0.2);
+}
+
+.clinical-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.clinical-btn-primary {
+  background: linear-gradient(to bottom, #e3eeeb, #ccdcd7);
+  border-color: #799a8c;
+  color: var(--color-accent-green);
+  font-weight: bold;
+}
+
+.clinical-btn-primary:hover {
+  background: linear-gradient(to bottom, #edf7f4, #dbeae6);
+}
+
+/* Workstation status display */
+.status-pill {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+}
+.status-pill.green { background-color: #38a169; box-shadow: 0 0 6px #38a169; }
+.status-pill.yellow { background-color: #dd6b20; box-shadow: 0 0 6px #dd6b20; }
+.status-pill.red { background-color: #e53e3e; box-shadow: 0 0 6px #e53e3e; }
+
+/* Table styling */
+.clinical-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-sans);
+  text-align: left;
+}
+
+.clinical-table th {
+  background-color: #d1dadf;
+  color: var(--color-text-dim);
+  font-size: 11px;
+  text-transform: uppercase;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--color-panel-border);
+  font-weight: 600;
+}
+
+.clinical-table td {
+  padding: 10px;
+  border-bottom: 1px solid #d4dfe8;
+  vertical-align: middle;
+}
+
+.clinical-table tr:hover {
+  background-color: #e4e9ed;
+}
+
+/* Patient card detail list */
+.detail-grid {
+  display: grid;
+  grid-template-columns: 100px 1fr;
+  gap: 6px 12px;
+  margin-bottom: 16px;
+}
+
+.detail-label {
+  font-family: var(--font-mono);
+  color: var(--color-text-dim);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.detail-val {
+  font-weight: 500;
+}
+
+/* CRT monitor lines effect overlay */
+.crt-lines {
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.04) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.01), rgba(0, 255, 0, 0.005), rgba(0, 0, 255, 0.01));
+  background-size: 100% 3px, 3px 100%;
+  z-index: 9999;
+}

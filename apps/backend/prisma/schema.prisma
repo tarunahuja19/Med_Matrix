@@ -29,6 +29,7 @@ model Study {
   modality    String    // MRI, CT etc
   studyDate   DateTime
   status      String    @default("pending") // pending, processing, complete
+  dicomKey    String?   // MinIO object key for the raw DICOM file
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   reports     Report[]
