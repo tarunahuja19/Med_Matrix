@@ -1,5 +1,6 @@
 import 'dotenv/config'
 import express from 'express'
+import cors from 'cors'
 import { PrismaClient } from '@prisma/client'
 import { initBuckets } from './storage'
 import { startWorker } from './worker'
@@ -9,6 +10,7 @@ const app = express()
 const prisma = new PrismaClient()
 const PORT = process.env.PORT ?? 3000
 
+app.use(cors())
 app.use(express.json())
 
 // ── Health ──────────────────────────────────────────────────────────────────

@@ -11,8 +11,10 @@
   "license": "ISC",
   "dependencies": {
     "@prisma/client": "5.22.0",
+    "@types/cors": "^2.8.19",
     "axios": "^1.7.9",
     "bullmq": "^5.78.1",
+    "cors": "^2.8.6",
     "dcmjs": "^0.52.0",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",

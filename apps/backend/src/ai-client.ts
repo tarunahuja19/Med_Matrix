@@ -98,10 +98,12 @@ export class AIServiceClient {
       })
       data = res.data
     } catch (err: unknown) {
-      const msg = axios.isAxiosError(err)
-        ? `AI-service /predict failed [${err.response?.status}]: ${JSON.stringify(err.response?.data)}`
-        : `AI-service /predict network error: ${String(err)}`
-      throw new Error(msg)
+      if (axios.isAxiosError(err)) {
+        throw new Error(
+          `AI-service /predict failed [${err.response?.status}]: ${JSON.stringify(err.response?.data)}`
+        )
+      }
+      throw new Error(`AI-service /predict network error: ${String(err)}`)
     }
 
     const { anomaly_scores, gating_decision, reconstructed_key, artifact_report } = data
