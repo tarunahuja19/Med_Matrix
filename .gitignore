@@ -35,3 +35,7 @@ npm-debug.log*
 
 # Local Notes & Cache
 .pytest_cache/
+
+# AI Service Data & Binaries
+ai-service/data/
+*.npy

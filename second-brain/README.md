@@ -8,16 +8,20 @@ Welcome to your developer second brain vault. This space is configured as a cent
 
 ```
 second-brain/
-├── 🧠 README.md            <- You are here (vault index)
+├── 🧠 index.md             <- Vault Index & Codebase File Map (Primary Entry Point)
+├── 📖 README.md            <- Obsidian Setup & Developer Guide (You are here)
 ├── 💾 memories/            <- Persistent knowledge & references
 │   └── 🏛️ architecture.md  <- Project architecture & tech stack
 └── 🧪 attempts/            <- Logs of tasks, experiments & debugging
-    └── 📑 template.md      <- Template for creating new logs
+    ├── 📑 template.md      <- Template for creating new logs
+    ├── 📑 phase_1_jemin.md <- Phase 1 input pipeline log
+    └── 📑 phase_2_gating_logic.md <- Phase 2 gating logic log
 ```
 
-### 🗂️ Key Folders
-*   **[💾 Memories](file:///home/jemin/Projects/MRI/KVISION/second-brain/memories/)**: Permanent knowledge, code references, setup logs, and system architectures.
-*   **[🧪 Attempts](file:///home/jemin/Projects/MRI/KVISION/second-brain/attempts/)**: Transient tracking of coding attempts, issues faced, solutions found, and research logs.
+### 🗂️ Key Links
+*   **[🧠 central vault index](file:///home/jemin/Projects/MRI/KVISION/second-brain/index.md)**: Main file linking all memories, logs, and codebase source code.
+*   **[💾 memories/](file:///home/jemin/Projects/MRI/KVISION/second-brain/memories/)**: Permanent knowledge, code references, setup logs, and system architectures.
+*   **[🧪 attempts/](file:///home/jemin/Projects/MRI/KVISION/second-brain/attempts/)**: Transient tracking of coding attempts, issues faced, solutions found, and research logs.
 
 ---
 
