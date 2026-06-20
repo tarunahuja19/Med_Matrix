@@ -197,19 +197,19 @@ def reconstruct(request: ReconstructRequest):
         )
 
 
-# Pathology Classes (11 Types matching kvision_inference.h / index.md)
+# Pathology Classes (11 Types matching the generator and model training labels)
 PATHOLOGY_CLASSES = [
     "Normal",
-    "Edema",
     "Tumor_Glioma",
-    "Tumor_Meningioma",
-    "Hemorrhage",
     "Ischemia",
     "MS_Lesions",
-    "Atrophy",
     "Hydrocephalus",
+    "Atrophy",
+    "Hemorrhage",
+    "Cerebral_Cyst",
+    "Edema",
     "AVM",
-    "Abscess"
+    "Cerebral_Microbleeds"
 ]
 
 _PATHOLOGY_MODEL = None
@@ -220,8 +220,8 @@ def get_pathology_model():
         return _PATHOLOGY_MODEL
         
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    # Look for fused_model.pt in the same folder
-    weights_path = os.path.join(os.path.dirname(__file__), 'fused_model.pt')
+    # Look for fused_model_128.pt in the same folder
+    weights_path = os.path.join(os.path.dirname(__file__), 'fused_model_128.pt')
     
     model = FusedS4CNNClassifier(
         d_model_s4=128,
@@ -229,8 +229,9 @@ def get_pathology_model():
         n_layers_s4=2,
         d_model_cnn=128,
         num_classes=11,
-        input_dim_s4=128 * 128,  # Resolution is 128
-        d_attn=128
+        input_dim_s4=16 * 128 * 128,  # 16 coils * 128 * 128 resolution
+        d_attn=128,
+        coils=16
     )
     
     if os.path.exists(weights_path):
@@ -410,37 +411,70 @@ def predict(request: PredictRequest):
             pathology_model = get_pathology_model()
 
             # Preprocess K-space: raw shape is [slices, coils, height, width]
-            # Convert to [1, 64, 1, 128, 128] complex64 tensor
+            slices_in, coils_in, h_in, w_in = kspace.shape
 
-            # Reduce coils to 1 if multiple coils present
-            if kspace.ndim == 4:
-                kspace_reduced = np.mean(kspace, axis=1, keepdims=True)
-            elif kspace.ndim == 3:
-                kspace_reduced = np.expand_dims(kspace, axis=1)
-            elif kspace.ndim == 2:
-                kspace_reduced = np.expand_dims(np.expand_dims(kspace, axis=0), axis=0)
-            else:
-                kspace_reduced = kspace
+            x_complex = kspace.astype(np.complex64)
+            x_tensor = torch.from_numpy(x_complex) # [slices, coils, H, W]
 
-            x_complex = kspace_reduced.astype(np.complex64)
-            x_tensor = torch.from_numpy(x_complex).unsqueeze(0) # [1, slices, 1, H, W]
+            # Resample spatial dimensions: Crop or Pad K-Space to 128x128
+            target_res = 128
+            if h_in > target_res:
+                sh = (h_in - target_res) // 2
+                x_tensor = x_tensor[:, :, sh:sh+target_res, :]
+            elif h_in < target_res:
+                pad_h = (target_res - h_in) // 2
+                pad_tensor = torch.zeros((slices_in, coils_in, target_res, w_in), dtype=x_tensor.dtype, device=x_tensor.device)
+                pad_tensor[:, :, pad_h:pad_h+h_in, :] = x_tensor
+                x_tensor = pad_tensor
 
-            # Resample slice dimension to 64 and spatial dimensions to 128x128
+            slices_in, coils_in, h_in, w_in = x_tensor.shape
+            if w_in > target_res:
+                sw = (w_in - target_res) // 2
+                x_tensor = x_tensor[:, :, :, sw:sw+target_res]
+            elif w_in < target_res:
+                pad_w = (target_res - w_in) // 2
+                pad_tensor = torch.zeros((slices_in, coils_in, target_res, target_res), dtype=x_tensor.dtype, device=x_tensor.device)
+                pad_tensor[:, :, :, pad_w:pad_w+w_in] = x_tensor
+                x_tensor = pad_tensor
+
+            # Separate real and imaginary parts
             x_real = torch.real(x_tensor)
             x_imag = torch.imag(x_tensor)
 
+            # Permute to [coils, 1, slices, 128, 128] to interpolate slices to 8 along Z axis
+            x_real_5d = x_real.permute(1, 0, 2, 3).unsqueeze(1) # [coils, 1, slices, 128, 128]
+            x_imag_5d = x_imag.permute(1, 0, 2, 3).unsqueeze(1) # [coils, 1, slices, 128, 128]
+
             real_interp = torch.nn.functional.interpolate(
-                x_real, size=(64, 128, 128), mode='trilinear', align_corners=False
-            )
+                x_real_5d, size=(8, 128, 128), mode='trilinear', align_corners=False
+            ).squeeze(1) # [coils, 8, 128, 128]
+
             imag_interp = torch.nn.functional.interpolate(
-                x_imag, size=(64, 128, 128), mode='trilinear', align_corners=False
-            )
+                x_imag_5d, size=(8, 128, 128), mode='trilinear', align_corners=False
+            ).squeeze(1) # [coils, 8, 128, 128]
 
-            # [1, 1, 64, 128, 128]
-            x_interp = torch.complex(real_interp, imag_interp)
+            # Now adjust coils to exactly 16
+            final_real = torch.zeros(16, 8, 128, 128, dtype=torch.float32)
+            final_imag = torch.zeros(16, 8, 128, 128, dtype=torch.float32)
 
-            # Permute to [B=1, S=64, C=1, H=128, W=128]
-            x_final = x_interp.permute(0, 2, 1, 3, 4)
+            if coils_in <= 16:
+                final_real[:coils_in] = real_interp
+                final_imag[:coils_in] = imag_interp
+            else:
+                final_real = real_interp[:16]
+                final_imag = imag_interp[:16]
+
+            # Permute back to [8, 16, 128, 128] (slices, coils, H, W)
+            final_real = final_real.permute(1, 0, 2, 3)
+            final_imag = final_imag.permute(1, 0, 2, 3)
+
+            # Convert back to complex and add batch dimension
+            x_final = torch.complex(final_real, final_imag).unsqueeze(0) # [1, 8, 16, 128, 128]
+
+            # Normalize complex k-space signal to unit standard deviation as in training
+            norm_factor = torch.std(torch.abs(x_final))
+            if norm_factor > 0:
+                x_final = x_final / norm_factor
 
             device = next(pathology_model.parameters()).device
             x_final = x_final.to(device)

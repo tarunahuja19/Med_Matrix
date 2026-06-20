@@ -13,17 +13,17 @@ namespace kvision {
 
 /// Pathology class labels (11 classes matching training)
 enum class Pathology : int {
-    Normal            = 0,
-    Edema             = 1,
-    Tumor_Glioma      = 2,
-    Tumor_Meningioma  = 3,
-    Hemorrhage        = 4,
-    Ischemia          = 5,
-    MS_Lesions        = 6,
-    Atrophy           = 7,
-    Hydrocephalus     = 8,
-    AVM               = 9,
-    Abscess           = 10
+    Normal                  = 0,
+    Tumor_Glioma            = 1,
+    Ischemia                = 2,
+    MS_Lesions              = 3,
+    Hydrocephalus           = 4,
+    Atrophy                 = 5,
+    Hemorrhage              = 6,
+    Cerebral_Cyst           = 7,
+    Edema                   = 8,
+    AVM                     = 9,
+    Cerebral_Microbleeds    = 10
 };
 
 /// Human-readable label for a pathology

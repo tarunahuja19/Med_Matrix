@@ -123,4 +123,40 @@ router.get('/:id/status', async (req, res) => {
   })
 })
 
+// ---------------------------------------------------------------------------
+// GET /studies/:id/reconstructed
+// Streams the reconstructed binary .npy file from MinIO reconstructed bucket
+// ---------------------------------------------------------------------------
+router.get('/:id/reconstructed', async (req, res) => {
+  const { id } = req.params
+
+  try {
+    // 1. Find the model result for this study that has a reconstructed key
+    const modelResult = await prisma.modelResult.findFirst({
+      where: {
+        studyId: id,
+        reconstructedKey: { not: null },
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    })
+
+    if (!modelResult || !modelResult.reconstructedKey) {
+      res.status(404).json({ error: 'Reconstructed image not found for this study' })
+      return
+    }
+
+    // 2. Fetch the reconstructed image stream from MinIO 'reconstructed' bucket
+    const stream = await minioClient.getObject('reconstructed', modelResult.reconstructedKey)
+
+    // 3. Set content headers and pipe the stream to client
+    res.setHeader('Content-Type', 'application/octet-stream')
+    stream.pipe(res)
+  } catch (err: any) {
+    console.error(`Failed to fetch reconstructed image for study ${id}: ${err.message}`)
+    res.status(500).json({ error: `Failed to fetch reconstructed image: ${err.message}` })
+  }
+})
+
 export default router

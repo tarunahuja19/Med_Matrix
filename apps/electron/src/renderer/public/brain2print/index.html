@@ -141,7 +141,69 @@
       <button id="cancelSaveBtn" formmethod="dialog">Cancel</button>
       <button autofocus id="applySaveBtn" value="default">Save</button>
     </form>
-  </dialog>
+  </dialog>
+  <script>
+    // Auto-load patient volume into the Niivue 3D viewer
+    let _lastLoadedUrl = null;
+    let _loadBusy = false;
+
+    async function loadPatientVolume(url) {
+      if (!url) return;
+      if (url === _lastLoadedUrl) {
+        console.log('[AutoLoad] Skipping — same URL already loaded.');
+        return;
+      }
+      if (_loadBusy) {
+        console.log('[AutoLoad] Skipping — previous load still in progress.');
+        return;
+      }
+      _loadBusy = true;
+      _lastLoadedUrl = url;
+      console.log('[AutoLoad] Loading patient volume:', url);
+
+      // Wait for Niivue instance
+      let nv = window.nv;
+      let attempts = 0;
+      while (!nv && attempts < 80) {
+        await new Promise(r => setTimeout(r, 200));
+        nv = window.nv;
+        attempts++;
+      }
+      if (!nv) {
+        console.error('[AutoLoad] Niivue instance not found.');
+        _loadBusy = false;
+        return;
+      }
+
+      try {
+        // Remove extra overlays but keep the viewer functional
+        while (nv.volumes.length > 1) {
+          await nv.removeVolume(nv.volumes[1]);
+        }
+
+        // Load the patient volume with a name hint so Niivue knows its NIfTI
+        console.log('[AutoLoad] Loading volume into Niivue...');
+        await nv.loadVolumes([{ url: url, name: 'patient_volume.nii' }]);
+        console.log('[AutoLoad] Volume loaded successfully. Total volumes:', nv.volumes.length);
+
+        // Enable Create Mesh button so the user CAN create a mesh manually if desired
+        const createMeshBtn = document.getElementById('createMeshBtn');
+        if (createMeshBtn) createMeshBtn.disabled = false;
+
+        _loadBusy = false;
+      } catch (err) {
+        console.error('[AutoLoad] Error loading volume:', err);
+        _loadBusy = false;
+      }
+    }
+
+    // Listen for postMessage from the parent React app
+    window.addEventListener('message', (event) => {
+      if (event.data && event.data.type === 'LOAD_PATIENT_VOLUME') {
+        loadPatientVolume(event.data.url);
+      }
+    });
+  </script>
 </body>
 
 </html>

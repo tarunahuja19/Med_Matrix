@@ -74,12 +74,9 @@ def reconstruct_kspace(kspace: np.ndarray, phase_correction: bool = True) -> np.
     """
     Reconstructs K-space data into magnitude images.
     
-    Steps:
-      1. (Optional) Apply 1D line-by-line phase correction in K-space.
-      2. Apply 2D IFFT slice-by-slice, coil-by-coil to compute coil images.
-      3. (Optional) Align coil phases using low-resolution calibration.
-      4. Apply Root Sum of Squares (RSS) coil combination.
-      
+    Uses compiled Rust binary for high performance reconstruction. If the Rust binary is
+    not found or fails, it falls back to the Python implementation.
+    
     Parameters:
         kspace (np.ndarray): Complex K-space array of shape [slices, coils, height, width] 
                              or [coils, height, width].
@@ -89,6 +86,11 @@ def reconstruct_kspace(kspace: np.ndarray, phase_correction: bool = True) -> np.
         np.ndarray: Combined magnitude image of shape [slices, height, width] 
                     (or [height, width] if input had no slice dimension).
     """
+    import os
+    import tempfile
+    import subprocess
+    import logging
+
     # Check dimensions and normalize to 4D [slices, coils, height, width]
     original_ndim = kspace.ndim
     if original_ndim == 3:
@@ -98,28 +100,81 @@ def reconstruct_kspace(kspace: np.ndarray, phase_correction: bool = True) -> np.
     elif original_ndim != 4:
         raise ValueError(f"Invalid input shape {kspace.shape}. Expected 2D, 3D, or 4D array.")
         
+    slices, coils, height, width = kspace.shape
+
+    # Path to compiled Rust binary
+    rust_bin_path = "/usr/local/bin/rust-mri-bin"
+    if not os.path.exists(rust_bin_path):
+        alt_path = os.path.join(os.path.dirname(__file__), "rust-mri-bin")
+        if os.path.exists(alt_path):
+            rust_bin_path = alt_path
+        else:
+            rust_bin_path = None
+
+    if rust_bin_path:
+        try:
+            # Cast to complex128 for precision to match Python
+            kspace_f64 = kspace.astype(np.complex128)
+            
+            with tempfile.TemporaryDirectory() as tmpdir:
+                in_path = os.path.join(tmpdir, "kspace_in.bin")
+                out_path = os.path.join(tmpdir, "magnitude_out.bin")
+                
+                # Write contiguous array to binary file
+                kspace_f64.tofile(in_path)
+                
+                # Run the Rust binary
+                cmd = [
+                    rust_bin_path,
+                    in_path,
+                    out_path,
+                    str(slices),
+                    str(coils),
+                    str(height),
+                    str(width),
+                    "true" if phase_correction else "false"
+                ]
+                
+                result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+                logging.getLogger("ai-service").info(f"Rust binary output: {result.stdout.strip()}")
+                
+                # Read magnitude float64 values from binary file
+                magnitude_flat = np.fromfile(out_path, dtype=np.float64)
+                recon_magnitude = magnitude_flat.reshape((slices, height, width))
+                
+                if original_ndim == 3:
+                    recon_magnitude = np.squeeze(recon_magnitude, axis=0)
+                elif original_ndim == 2:
+                    recon_magnitude = np.squeeze(recon_magnitude)
+                    
+                return recon_magnitude
+                
+        except Exception as e:
+            logging.getLogger("ai-service").warning(
+                f"Rust MRI reconstruction failed (binary: {rust_bin_path}): {e}. Falling back to Python."
+            )
+
     # 1. Apply line-by-line phase correction in K-space
     if phase_correction:
-        kspace = correct_line_phases(kspace)
+        kspace_pc = correct_line_phases(kspace)
+    else:
+        kspace_pc = kspace.copy()
         
-    slices, coils, height, width = kspace.shape
-    coil_images = np.zeros_like(kspace, dtype=np.complex128)
+    coil_images = np.zeros_like(kspace_pc, dtype=np.complex128)
     
     # 2. Apply 2D IFFT slice-by-slice, coil-by-coil
     for s in range(slices):
         for c in range(coils):
             # Centering: input ifftshift, ifft2, output fftshift
-            shifted_k = np.fft.ifftshift(kspace[s, c, :, :])
+            shifted_k = np.fft.ifftshift(kspace_pc[s, c, :, :])
             img_c = np.fft.ifft2(shifted_k)
             coil_images[s, c, :, :] = np.fft.fftshift(img_c)
             
     # 3. Apply coil phase alignment
     if phase_correction:
-        coil_images = align_coil_phases(coil_images, kspace)
+        coil_images = align_coil_phases(coil_images, kspace_pc)
         
     # 4. Root Sum of Squares (RSS) combination
-    # Combined = sqrt( sum( |coil_images|^2, axis=coil_axis ) )
-    # coil_axis is 1 (second dimension in [slices, coils, height, width])
     combined = np.sqrt(np.sum(np.abs(coil_images)**2, axis=1))
     
     # Squeeze output to match input dimensions

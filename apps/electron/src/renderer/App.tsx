@@ -53,7 +53,21 @@ interface AIFindings {
 }
 
 // ── Tabs ─────────────────────────────────────────────────────────────────────
-type Tab = 'ingest' | 'archive' | 'patients' | 'reports' | 'brain3d'
+type Tab = 'ingest' | 'archive' | 'patients' | 'reports' | 'brain3d' | 'analytics'
+
+const SIMULATED_DISEASES = [
+  'Normal',
+  'Tumor_Glioma',
+  'Ischemia',
+  'MS_Lesions',
+  'Hydrocephalus',
+  'Atrophy',
+  'Hemorrhage',
+  'Cerebral_Cyst',
+  'Edema',
+  'AVM',
+  'Cerebral_Microbleeds'
+]
 
 const API = 'http://localhost:3000'
 
@@ -71,6 +85,358 @@ function statusPillClass(s: string) {
   return 'yellow'
 }
 
+function parseNpy(arrayBuffer: ArrayBuffer) {
+  const view = new DataView(arrayBuffer)
+  // Check magic number: \x93NUMPY
+  const magic = String.fromCharCode(
+    view.getUint8(0),
+    view.getUint8(1),
+    view.getUint8(2),
+    view.getUint8(3),
+    view.getUint8(4),
+    view.getUint8(5)
+  )
+  if (magic !== '\x93NUMPY') {
+    throw new Error('Invalid NPY file format')
+  }
+  const major = view.getUint8(6)
+  let headerLen = 0
+  let offset = 8
+  if (major === 1) {
+    headerLen = view.getUint16(8, true)
+    offset = 10
+  } else if (major === 2) {
+    headerLen = view.getUint32(8, true)
+    offset = 12
+  }
+
+  const headerText = new TextDecoder('utf-8').decode(new Uint8Array(arrayBuffer, offset, headerLen))
+
+  const shapeMatch = headerText.match(/'shape':\s*\((.*?)\)/)
+  if (!shapeMatch) {
+    throw new Error('Shape not found in NPY header')
+  }
+  const shape = shapeMatch[1]
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map(Number)
+
+  const descrMatch = headerText.match(/'descr':\s*'([^']+)'/)
+  if (!descrMatch) {
+    throw new Error('descr not found in NPY header')
+  }
+  const descr = descrMatch[1]
+
+  const dataOffset = offset + headerLen
+  const dataBuffer = arrayBuffer.slice(dataOffset)
+
+  let data: Float32Array | Float64Array | Int32Array | Int16Array | Uint8Array
+  if (descr.includes('f4')) {
+    data = new Float32Array(dataBuffer)
+  } else if (descr.includes('f8')) {
+    data = new Float64Array(dataBuffer)
+  } else if (descr.includes('i4')) {
+    data = new Int32Array(dataBuffer)
+  } else if (descr.includes('i2')) {
+    data = new Int16Array(dataBuffer)
+  } else if (descr.includes('u1')) {
+    data = new Uint8Array(dataBuffer)
+  } else {
+    data = new Float32Array(dataBuffer)
+  }
+
+  return { shape, data }
+}
+
+function convertNpyToNifti(parsedNpy: { shape: number[]; data: any }): ArrayBuffer {
+  const [slices, height, width] = parsedNpy.shape
+  const numVoxels = slices * height * width
+  const floatData = new Float32Array(parsedNpy.data)
+  const headerBuffer = new ArrayBuffer(352)
+  const view = new DataView(headerBuffer)
+
+  // sizeof_hdr
+  view.setInt32(0, 348, true)
+
+  // dim
+  view.setInt16(40, 3, true)
+  view.setInt16(42, width, true)
+  view.setInt16(44, height, true)
+  view.setInt16(46, slices, true)
+  view.setInt16(48, 1, true)
+  view.setInt16(50, 1, true)
+  view.setInt16(52, 1, true)
+  view.setInt16(54, 1, true)
+
+  // datatype: float32 is 16
+  view.setInt16(70, 16, true)
+
+  // bitpix: 32 bits per voxel
+  view.setInt16(72, 32, true)
+
+  // pixdim
+  view.setFloat32(76, 1.0, true)
+  view.setFloat32(80, 1.0, true)
+  view.setFloat32(84, 1.0, true)
+  view.setFloat32(88, 1.0, true)
+
+  // vox_offset
+  view.setFloat32(108, 352, true)
+
+  // magic: "n+1\0"
+  view.setUint8(344, 110)
+  view.setUint8(345, 43)
+  view.setUint8(346, 49)
+  view.setUint8(347, 0)
+
+  const combined = new Uint8Array(352 + numVoxels * 4)
+  combined.set(new Uint8Array(headerBuffer), 0)
+  combined.set(new Uint8Array(floatData.buffer, floatData.byteOffset, floatData.byteLength), 352)
+
+  return combined.buffer
+}
+
+
+function renderSlice(canvas: HTMLCanvasElement, data: any, shape: number[], sliceIndex: number) {
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+
+  const [slices, height, width] = shape
+
+  if (sliceIndex < 0 || sliceIndex >= slices) return
+
+  canvas.width = width
+  canvas.height = height
+
+  const sliceSize = height * width
+  const startIndex = sliceIndex * sliceSize
+  const sliceData = data.subarray
+    ? data.subarray(startIndex, startIndex + sliceSize)
+    : data.slice(startIndex, startIndex + sliceSize)
+
+  let min = sliceData[0]
+  let max = sliceData[0]
+  for (let i = 1; i < sliceData.length; i++) {
+    if (sliceData[i] < min) min = sliceData[i]
+    if (sliceData[i] > max) max = sliceData[i]
+  }
+
+  const range = max - min || 1e-8
+
+  const imgData = ctx.createImageData(width, height)
+  for (let i = 0; i < sliceData.length; i++) {
+    const val = Math.floor(((sliceData[i] - min) / range) * 255)
+    const pixelIndex = i * 4
+    imgData.data[pixelIndex] = val // R
+    imgData.data[pixelIndex + 1] = val // G
+    imgData.data[pixelIndex + 2] = val // B
+    imgData.data[pixelIndex + 3] = 255 // A
+  }
+
+  ctx.putImageData(imgData, 0, 0)
+}
+
+function ClinicalMRIViewer({ studyId }: { studyId: string }) {
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [arrayData, setArrayData] = useState<{ shape: number[]; data: any } | null>(null)
+  const [sliceIndex, setSliceIndex] = useState(0)
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+
+  useEffect(() => {
+    let active = true
+    setLoading(true)
+    setError(null)
+    setArrayData(null)
+    setSliceIndex(0)
+
+    fetch(`${API}/studies/${studyId}/reconstructed`)
+      .then(async (res) => {
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}))
+          throw new Error(errData.error || `Error status: ${res.status}`)
+        }
+        return res.arrayBuffer()
+      })
+      .then((buffer) => {
+        if (!active) return
+        const parsed = parseNpy(buffer)
+        setArrayData(parsed)
+        setLoading(false)
+      })
+      .catch((err) => {
+        if (!active) return
+        console.error(err)
+        setError(err.message)
+        setLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [studyId])
+
+  useEffect(() => {
+    if (arrayData && canvasRef.current) {
+      renderSlice(canvasRef.current, arrayData.data, arrayData.shape, sliceIndex)
+    }
+  }, [arrayData, sliceIndex])
+
+  if (loading) {
+    return (
+      <div className="bevel-inset" style={{ height: '240px', background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-accent-blue)', fontFamily: 'var(--font-mono)', fontSize: '11px' }}>
+        LOADING MRI RECONSTRUCTION DATA...
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="bevel-inset" style={{ height: '240px', background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-accent-red)', padding: '20px', textAlign: 'center', fontSize: '11px', fontFamily: 'var(--font-mono)' }}>
+        ⚠ IMAGE NOT RETRIEVED: {error}
+      </div>
+    )
+  }
+
+  if (!arrayData) {
+    return null
+  }
+
+  const [slices, height, width] = arrayData.shape
+
+  return (
+    <div className="bevel-inset" style={{ background: '#0a0d10', padding: '12px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-text-dim)' }}>
+        <span>RESOLUTION: {width}x{height}</span>
+        <span>SLICE: {sliceIndex + 1} / {slices}</span>
+      </div>
+      
+      <div style={{ border: '1px solid #1a252f', background: '#000', padding: '4px', position: 'relative' }}>
+        <canvas ref={canvasRef} style={{ width: '220px', height: '220px', imageRendering: 'pixelated' }} />
+      </div>
+
+      <div style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <button 
+          disabled={sliceIndex <= 0}
+          onClick={() => setSliceIndex(prev => prev - 1)}
+          className="clinical-btn"
+          style={{ padding: '2px 8px', fontSize: '10px' }}
+        >
+          ◄
+        </button>
+        <input 
+          type="range"
+          min={0}
+          max={slices - 1}
+          value={sliceIndex}
+          onChange={(e) => setSliceIndex(Number(e.target.value))}
+          style={{ flex: 1, accentColor: 'var(--color-accent-blue)', height: '4px' }}
+        />
+        <button 
+          disabled={sliceIndex >= slices - 1}
+          onClick={() => setSliceIndex(prev => prev + 1)}
+          className="clinical-btn"
+          style={{ padding: '2px 8px', fontSize: '10px' }}
+        >
+          ►
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function ArtifactRadarChart({ ghosting, wrapAround, zipperNoise }: { ghosting: number; wrapAround: number; zipperNoise: number }) {
+  const cx = 100
+  const cy = 100
+  const r = 60
+
+  const getGridPoints = (scale: number) => {
+    const points = []
+    for (let i = 0; i < 3; i++) {
+      const angle = -Math.PI / 2 + (i * 2 * Math.PI) / 3
+      points.push(`${cx + r * scale * Math.cos(angle)},${cy + r * scale * Math.sin(angle)}`)
+    }
+    return points.join(' ')
+  }
+
+  const dataPoints = [
+    { name: 'Ghosting', val: ghosting, angle: -Math.PI / 2 },
+    { name: 'Wrap-Around', val: wrapAround, angle: -Math.PI / 2 + (2 * Math.PI) / 3 },
+    { name: 'Zipper Noise', val: zipperNoise, angle: -Math.PI / 2 + (4 * Math.PI) / 3 }
+  ]
+  const dataPoly = dataPoints
+    .map((p) => `${cx + r * p.val * Math.cos(p.angle)},${cy + r * p.val * Math.sin(p.angle)}`)
+    .join(' ')
+
+  return (
+    <svg viewBox="0 0 200 200" style={{ width: '100%', height: '220px' }}>
+      {[0.25, 0.5, 0.75, 1.0].map((s) => (
+        <polygon
+          key={s}
+          points={getGridPoints(s)}
+          fill="none"
+          stroke="var(--color-panel-border)"
+          strokeWidth="0.5"
+          strokeDasharray="2 2"
+        />
+      ))}
+
+      {dataPoints.map((p) => {
+        const x2 = cx + r * Math.cos(p.angle)
+        const y2 = cy + r * Math.sin(p.angle)
+        return (
+          <g key={p.name}>
+            <line x1={cx} y1={cy} x2={x2} y2={y2} stroke="var(--color-panel-border)" strokeWidth="1" />
+            <text
+              x={cx + (r + 14) * Math.cos(p.angle)}
+              y={cy + (r + 14) * Math.sin(p.angle) + (p.angle === -Math.PI / 2 ? -6 : p.angle > 0 ? 4 : -2)}
+              textAnchor="middle"
+              dominantBaseline="middle"
+              fontSize="8"
+              fontFamily="var(--font-mono)"
+              fontWeight="bold"
+              fill="var(--color-accent-blue)"
+            >
+              {p.name.toUpperCase()}
+            </text>
+            <text
+              x={cx + (r + 14) * Math.cos(p.angle)}
+              y={cy + (r + 14) * Math.sin(p.angle) + (p.angle === -Math.PI / 2 ? 4 : p.angle > 0 ? 12 : 6)}
+              textAnchor="middle"
+              dominantBaseline="middle"
+              fontSize="8"
+              fontFamily="var(--font-mono)"
+              fill="var(--color-text-main)"
+            >
+              {p.val.toFixed(3)}
+            </text>
+          </g>
+        )
+      })}
+
+      <polygon
+        points={dataPoly}
+        fill="rgba(50, 96, 132, 0.25)"
+        stroke="var(--color-accent-blue)"
+        strokeWidth="2"
+      />
+      
+      {dataPoints.map((p) => (
+        <circle
+          key={p.name}
+          cx={cx + r * p.val * Math.cos(p.angle)}
+          cy={cy + r * p.val * Math.sin(p.angle)}
+          r="3"
+          fill="var(--color-accent-blue)"
+          stroke="#fff"
+          strokeWidth="1"
+        />
+      ))}
+    </svg>
+  )
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 export default function App() {
   // navigation
@@ -81,6 +447,211 @@ export default function App() {
   const [patients, setPatients] = useState<Patient[]>([])
   const [studies, setStudies] = useState<Study[]>([])
   const [reports, setReports] = useState<Report[]>([])
+
+  // analytics
+  const [useSimulatedData, setUseSimulatedData] = useState(true)
+
+  // 3D Model auto-load state
+  const brain3dIframeRef = useRef<HTMLIFrameElement | null>(null)
+  const brain3dLastStudyRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (reports.length > 0) {
+      setUseSimulatedData(false)
+    }
+  }, [reports])
+
+  useEffect(() => {
+    if (!brain3dSelectedPatientId) {
+      brain3dLastStudyRef.current = null
+      return
+    }
+
+    // Find the latest completed study for this patient
+    const patientStudies = studies.filter(s => s.patientId === brain3dSelectedPatientId && s.status === 'complete')
+    if (patientStudies.length === 0) return
+
+    const latestStudy = [...patientStudies].sort((a, b) => new Date(b.studyDate).getTime() - new Date(a.studyDate).getTime())[0]
+
+    // Skip if we already loaded this exact study
+    if (brain3dLastStudyRef.current === latestStudy.id) return
+    brain3dLastStudyRef.current = latestStudy.id
+
+    let active = true
+
+    const fetchAndSend = async () => {
+      try {
+        addLog(`[3D Viewer] Fetching reconstructed volume for study ${latestStudy.id}...`)
+        const res = await fetch(`${API}/studies/${latestStudy.id}/reconstructed`)
+        if (!res.ok) throw new Error(`Reconstruction fetch failed: ${res.status}`)
+
+        const buffer = await res.arrayBuffer()
+        if (!active) return
+
+        const parsed = parseNpy(buffer)
+        const niftiBuffer = convertNpyToNifti(parsed)
+        const blob = new Blob([niftiBuffer], { type: 'application/octet-stream' })
+        const objectUrl = URL.createObjectURL(blob)
+
+        if (!active) { URL.revokeObjectURL(objectUrl); return }
+
+        addLog(`[3D Viewer] Volume ready — sending to 3D viewer...`)
+
+        // Send to the iframe via postMessage (iframe src never changes)
+        const sendToIframe = () => {
+          const iframe = brain3dIframeRef.current
+          if (iframe?.contentWindow) {
+            iframe.contentWindow.postMessage(
+              { type: 'LOAD_PATIENT_VOLUME', url: objectUrl },
+              '*'
+            )
+          }
+        }
+
+        // The iframe might not be loaded yet if the user just switched tabs.
+        // Try immediately, then retry a few times.
+        sendToIframe()
+        setTimeout(sendToIframe, 1000)
+        setTimeout(sendToIframe, 3000)
+      } catch (err: any) {
+        console.error('[3D Viewer] Error loading volume:', err)
+        addLog(`[3D Viewer] Error: ${err.message}`)
+      }
+    }
+
+    fetchAndSend()
+
+    return () => { active = false }
+  }, [brain3dSelectedPatientId, studies])
+
+  const getAnalyticsData = () => {
+    let dataset: {
+      anomalyDetected: boolean
+      confidence: number
+      imageEncoderTriggered: boolean
+      predictedPathology?: string
+      pathologyConfidence?: number
+      artifactScores?: Record<string, number>
+    }[] = []
+
+    if (useSimulatedData || reports.length === 0) {
+      const distributions = {
+        "Normal": 18,
+        "Tumor_Glioma": 6,
+        "Ischemia": 5,
+        "MS_Lesions": 5,
+        "Hydrocephalus": 3,
+        "Atrophy": 3,
+        "Hemorrhage": 4,
+        "Cerebral_Cyst": 1,
+        "Edema": 2,
+        "AVM": 1,
+        "Cerebral_Microbleeds": 2
+      }
+      
+      let index = 0;
+      Object.entries(distributions).forEach(([pathology, count]) => {
+        for (let i = 0; i < count; i++) {
+          const isNormal = pathology === 'Normal';
+          const anomalyDetected = !isNormal;
+          
+          const seedConf = 0.85 + ((index * 3) % 15) / 100;
+          const ghosting = isNormal ? 0.05 + ((index * 7) % 15) / 100 : 0.4 + ((index * 11) % 55) / 100;
+          const wrapAround = isNormal ? 0.08 + ((index * 9) % 15) / 100 : 0.35 + ((index * 13) % 45) / 100;
+          const zipper = isNormal ? 0.02 + ((index * 13) % 15) / 100 : 0.1 + ((index * 17) % 80) / 100;
+          
+          dataset.push({
+            anomalyDetected,
+            confidence: isNormal ? 0.92 + ((index * 2) % 7) / 100 : seedConf,
+            imageEncoderTriggered: anomalyDetected,
+            predictedPathology: pathology,
+            pathologyConfidence: isNormal ? 0.94 + ((index * 2) % 5) / 100 : seedConf - 0.05,
+            artifactScores: {
+              ghosting,
+              wrap_around: wrapAround,
+              zipper_noise: zipper
+            }
+          })
+          index++;
+        }
+      })
+    } else {
+      reports.forEach((r) => {
+        const findings = parseFindings(r.findings)
+        if (findings) {
+          dataset.push({
+            anomalyDetected: findings.anomalyDetected,
+            confidence: findings.confidence ?? 0,
+            imageEncoderTriggered: findings.imageEncoderTriggered,
+            predictedPathology: findings.predictedPathology,
+            pathologyConfidence: findings.pathologyConfidence,
+            artifactScores: findings.artifactScores
+          })
+        }
+      })
+    }
+
+    const total = dataset.length
+    const anomalies = dataset.filter(d => d.anomalyDetected).length
+    const gatingRate = total > 0 ? (anomalies / total) * 100 : 0
+    
+    let sumConfidence = 0
+    let countConfidence = 0
+    dataset.forEach(d => {
+      if (d.pathologyConfidence !== undefined) {
+        sumConfidence += d.pathologyConfidence
+        countConfidence++
+      }
+    })
+    const avgConfidence = countConfidence > 0 ? (sumConfidence / countConfidence) * 100 : 0
+
+    const pathologyCounts: Record<string, number> = {}
+    SIMULATED_DISEASES.forEach(d => { pathologyCounts[d] = 0 })
+    dataset.forEach(d => {
+      if (d.predictedPathology) {
+        pathologyCounts[d.predictedPathology] = (pathologyCounts[d.predictedPathology] || 0) + 1
+      }
+    })
+
+    let mostFrequent = 'None'
+    let maxCount = -1
+    Object.entries(pathologyCounts).forEach(([pathology, count]) => {
+      if (pathology !== 'Normal' && count > maxCount) {
+        maxCount = count
+        mostFrequent = pathology
+      }
+    })
+
+    let sumGhosting = 0, sumWrap = 0, sumZipper = 0
+    let countArtifacts = 0
+    dataset.forEach(d => {
+      if (d.artifactScores) {
+        sumGhosting += d.artifactScores.ghosting ?? 0
+        sumWrap += d.artifactScores.wrap_around ?? 0
+        sumZipper += d.artifactScores.zipper_noise ?? 0
+        countArtifacts++
+      }
+    })
+    
+    const avgGhosting = countArtifacts > 0 ? sumGhosting / countArtifacts : 0
+    const avgWrap = countArtifacts > 0 ? sumWrap / countArtifacts : 0
+    const avgZipper = countArtifacts > 0 ? sumZipper / countArtifacts : 0
+
+    return {
+      total,
+      anomalies,
+      gatingRate,
+      avgConfidence,
+      mostFrequent,
+      pathologyCounts,
+      avgArtifacts: {
+        ghosting: avgGhosting,
+        wrap_around: avgWrap,
+        zipper_noise: avgZipper
+      },
+      rawDataset: dataset
+    }
+  }
 
   // ingest panel state
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null)
@@ -115,8 +686,9 @@ export default function App() {
     `[${new Date().toLocaleTimeString()}] Database link established.`,
   ])
 
-  const addLog = (msg: string) =>
+  function addLog(msg: string) {
     setLogs((prev) => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev.slice(0, 49)])
+  }
 
   // ── Fetch helpers ───────────────────────────────────────────────────────────
   const fetchPatients = async () => {
@@ -345,6 +917,7 @@ export default function App() {
     { id: 'patients', label: 'Patients' },
     { id: 'reports', label: 'AI Reports' },
     { id: 'brain3d', label: '3D Brain Model' },
+    { id: 'analytics', label: 'Analytics' },
   ]
 
   return (
@@ -757,6 +1330,14 @@ export default function App() {
                               )}
                             </div>
                           )}
+                          {f?.reconstructedKey && (
+                            <div style={{ marginTop: '14px' }}>
+                              <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text-dim)', textTransform: 'uppercase', marginBottom: '8px' }}>
+                                MRI Slice Viewer
+                              </div>
+                              <ClinicalMRIViewer studyId={selectedStudy.id} />
+                            </div>
+                          )}
                           {f?.artifactScores && (
                             <div style={{ marginTop: '10px' }}>
                               <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text-dim)', textTransform: 'uppercase', marginBottom: '6px' }}>Artifact Scores</div>
@@ -1000,6 +1581,15 @@ export default function App() {
                               </div>
                             )}
                           </div>
+
+                          {f.reconstructedKey && (
+                            <div style={{ border: '1px solid var(--color-panel-border)', padding: '12px', background: '#f5f7f8' }}>
+                              <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text-dim)', textTransform: 'uppercase', marginBottom: '8px' }}>
+                                MRI Slice Reconstruction Preview
+                              </div>
+                              <ClinicalMRIViewer studyId={selectedReport.studyId} />
+                            </div>
+                          )}
 
                           {/* Pathology Probabilities List */}
                           {f.pathologyProbabilities && (
@@ -1257,6 +1847,7 @@ export default function App() {
               </div>
               <div className="panel-body" style={{ padding: 0, height: '100%', overflow: 'hidden' }}>
                 <iframe
+                  ref={brain3dIframeRef}
                   src="./brain2print/index.html"
                   style={{ width: '100%', height: '100%', border: 'none' }}
                   title="brain2print 3D Brain Model"
@@ -1265,6 +1856,240 @@ export default function App() {
             </div>
           </>
         )}
+
+        {/* ═══════════════════════════════════ ANALYTICS TAB ══════════════════════════════════ */}
+        {tab === 'analytics' && (() => {
+          const { total, anomalies, gatingRate, avgConfidence, mostFrequent, pathologyCounts, avgArtifacts } = getAnalyticsData()
+
+          return (
+            <>
+              {/* Left Panel: Metrics & Controls */}
+              <div className="syngo-panel">
+                <div className="panel-header">
+                  <span>Workstation Metrics</span>
+                  <span style={{ fontFamily: 'var(--font-mono)' }}>[METRICS-01]</span>
+                </div>
+                <div className="panel-body" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  {/* Simulation toggle */}
+                  <div style={{ background: '#d1dadf', border: '1px solid var(--color-panel-border)', padding: '10px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--color-accent-blue)' }}>
+                      Data Control
+                    </div>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontFamily: 'var(--font-mono)', cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={useSimulatedData}
+                        onChange={(e) => setUseSimulatedData(e.target.checked)}
+                        style={{ width: '14px', height: '14px' }}
+                      />
+                      Workstation Simulation Mode
+                    </label>
+                    <div style={{ fontSize: '9px', color: 'var(--color-text-dim)' }}>
+                      {useSimulatedData ? 'Displaying 50 pre-compiled studies for testing' : 'Reading live data from database'}
+                    </div>
+                  </div>
+
+                  {/* Summary Indicators */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    <div className="bevel-inset" style={{ padding: '10px', background: '#0a0d10', color: 'var(--color-accent-blue)' }}>
+                      <div style={{ fontSize: '10px', color: 'var(--color-text-dim)', textTransform: 'uppercase', fontFamily: 'var(--font-mono)' }}>TOTAL INGESTED SCANS</div>
+                      <div style={{ fontSize: '28px', fontFamily: 'var(--font-mono)', fontWeight: 'bold', color: '#00ffff' }}>{String(total).padStart(4, '0')}</div>
+                    </div>
+
+                    <div className="bevel-inset" style={{ padding: '10px', background: '#0a0d10', color: 'var(--color-accent-green)' }}>
+                      <div style={{ fontSize: '10px', color: 'var(--color-text-dim)', textTransform: 'uppercase', fontFamily: 'var(--font-mono)' }}>K-SPACE GATING RATE</div>
+                      <div style={{ fontSize: '28px', fontFamily: 'var(--font-mono)', fontWeight: 'bold', color: 'var(--color-accent-amber)' }}>{gatingRate.toFixed(1)}%</div>
+                    </div>
+
+                    <div className="bevel-inset" style={{ padding: '10px', background: '#0a0d10', color: 'var(--color-accent-green)' }}>
+                      <div style={{ fontSize: '10px', color: 'var(--color-text-dim)', textTransform: 'uppercase', fontFamily: 'var(--font-mono)' }}>AVG AI CONFIDENCE</div>
+                      <div style={{ fontSize: '28px', fontFamily: 'var(--font-mono)', fontWeight: 'bold', color: '#39a169' }}>{avgConfidence.toFixed(1)}%</div>
+                    </div>
+
+                    <div className="bevel-inset" style={{ padding: '10px', background: '#0a0d10', color: 'var(--color-accent-blue)' }}>
+                      <div style={{ fontSize: '10px', color: 'var(--color-text-dim)', textTransform: 'uppercase', fontFamily: 'var(--font-mono)' }}>MOST COMMON PATHOLOGY</div>
+                      <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#fff', marginTop: '6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {mostFrequent.replace(/_/g, ' ').toUpperCase()}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: 'auto', borderTop: '1px solid var(--color-panel-border)', paddingTop: '10px' }}>
+                    <button onClick={fetchReports} className="clinical-btn" style={{ width: '100%' }}>
+                      Sync Real Data
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Right Panel: Analytics Dashboard */}
+              <div className="syngo-panel">
+                <div className="panel-header">
+                  <span>Diagnostic Analytics Dashboard</span>
+                  <span style={{ fontFamily: 'var(--font-mono)' }}>[DASHBOARD-01]</span>
+                </div>
+                <div className="panel-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', overflowY: 'auto' }}>
+                  
+                  {/* Top-Left: Pathology distribution */}
+                  <div style={{ border: '1px solid var(--color-panel-border)', padding: '12px', background: '#f5f7f8', display: 'flex', flexDirection: 'column' }}>
+                    <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text-dim)', textTransform: 'uppercase', marginBottom: '8px' }}>
+                      Pathology Prevalence Distribution
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', flex: 1, justifyContent: 'space-between' }}>
+                      {Object.entries(pathologyCounts).map(([k, v]) => {
+                        const count = v as number
+                        const pct = total > 0 ? (count / total) * 100 : 0
+                        const isNormal = k === 'Normal'
+                        
+                        let barColor = 'var(--color-accent-blue)'
+                        if (isNormal) barColor = 'var(--color-accent-green)'
+                        else if (count > 0 && ['Tumor_Glioma', 'MS_Lesions', 'Hemorrhage', 'Cerebral_Microbleeds'].includes(k)) barColor = 'var(--color-accent-red)'
+                        else if (count > 0) barColor = 'var(--color-accent-amber)'
+                        
+                        return (
+                          <div key={k} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ fontSize: '9px', fontFamily: 'var(--font-mono)', width: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textTransform: 'uppercase' }}>
+                              {k.replace(/_/g, ' ')}
+                            </span>
+                            <div className="bevel-inset" style={{ flex: 1, height: '12px', background: '#d0d8de', overflow: 'hidden', borderRadius: '1px', position: 'relative' }}>
+                              <div style={{
+                                height: '100%',
+                                width: `${pct}%`,
+                                background: barColor,
+                                transition: 'width 0.5s ease',
+                              }} />
+                            </div>
+                            <span style={{ fontSize: '9px', fontFamily: 'var(--font-mono)', width: '25px', textAlign: 'right', fontWeight: count > 0 ? 'bold' : 'normal' }}>
+                              {count}
+                            </span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Top-Right: Radar & Flow visualizers */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                    {/* Artifact radar */}
+                    <div style={{ border: '1px solid var(--color-panel-border)', padding: '12px', background: '#f5f7f8', flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                      <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text-dim)', textTransform: 'uppercase', marginBottom: '8px', width: '100%' }}>
+                        Prevalent Artifact Profiling (S4 branch)
+                      </div>
+                      <ArtifactRadarChart 
+                        ghosting={avgArtifacts.ghosting} 
+                        wrapAround={avgArtifacts.wrap_around} 
+                        zipperNoise={avgArtifacts.zipper_noise} 
+                      />
+                    </div>
+
+                    {/* Gating Decision Pipeline Visual Flowchart */}
+                    <div style={{ border: '1px solid var(--color-panel-border)', padding: '12px', background: '#f5f7f8', display: 'flex', flexDirection: 'column' }}>
+                      <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text-dim)', textTransform: 'uppercase', marginBottom: '8px' }}>
+                        Acquisition Decision Flow (Gating: {gatingRate.toFixed(0)}% Triggered)
+                      </div>
+                      <div style={{ background: '#ebeeef', padding: '6px', border: '1px solid var(--color-panel-border)' }}>
+                        <svg viewBox="0 0 500 150" style={{ width: '100%', height: '150px' }}>
+                          <defs>
+                            <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                              <path d="M 0 0 L 10 5 L 0 10 z" fill="#5c6c77" />
+                            </marker>
+                          </defs>
+                          
+                          {/* Raw K-Space */}
+                          <rect x="10" y="45" width="90" height="45" rx="3" fill="#dee3e6" stroke="var(--color-panel-border)" strokeWidth="1.5" />
+                          <text x="55" y="62" textAnchor="middle" dominantBaseline="middle" fontSize="10" fontFamily="var(--font-mono)" fontWeight="bold" fill="var(--color-text-main)">K-SPACE IN</text>
+                          <text x="55" y="75" textAnchor="middle" dominantBaseline="middle" fontSize="8" fontFamily="var(--font-mono)" fill="var(--color-text-dim)">[8s × 16c]</text>
+
+                          <line x1="100" y1="67" x2="135" y2="67" stroke="#5c6c77" strokeWidth="1.5" markerEnd="url(#arrow)" />
+
+                          {/* Anomaly detector */}
+                          <rect x="140" y="45" width="100" height="45" rx="3" fill="var(--color-light-glow)" stroke="var(--color-accent-blue)" strokeWidth="2" />
+                          <text x="190" y="62" textAnchor="middle" dominantBaseline="middle" fontSize="10" fontFamily="var(--font-mono)" fontWeight="bold" fill="var(--color-accent-blue)">AI ANOMALY</text>
+                          <text x="190" y="75" textAnchor="middle" dominantBaseline="middle" fontSize="9" fontFamily="var(--font-mono)" fontWeight="bold" fill="var(--color-text-main)">GATING</text>
+
+                          {/* Split path: Clean */}
+                          <path d="M 190 90 L 190 120 L 255 120" fill="none" stroke="#2b704c" strokeWidth="1.5" strokeDasharray="3 3" markerEnd="url(#arrow)" />
+                          <text x="210" y="112" fontSize="7" fontFamily="var(--font-mono)" fontWeight="bold" fill="var(--color-accent-green)">CLEAN ({(100 - gatingRate).toFixed(0)}%)</text>
+
+                          {/* Split path: Anomalous */}
+                          <line x1="240" y1="67" x2="275" y2="67" stroke="var(--color-accent-amber)" strokeWidth="2" markerEnd="url(#arrow)" />
+                          <text x="257" y="58" textAnchor="middle" fontSize="7" fontFamily="var(--font-mono)" fontWeight="bold" fill="var(--color-accent-amber)">DIRTY ({gatingRate.toFixed(0)}%)</text>
+
+                          {/* Bypass */}
+                          <rect x="260" y="102" width="100" height="35" rx="3" fill="#ebeeef" stroke="var(--color-accent-green)" strokeWidth="1.5" />
+                          <text x="310" y="119" textAnchor="middle" dominantBaseline="middle" fontSize="9" fontFamily="var(--font-mono)" fontWeight="bold" fill="var(--color-accent-green)">BYPASS RECON</text>
+
+                          {/* Pipeline */}
+                          <rect x="280" y="45" width="100" height="45" rx="3" fill="#fcf3e3" stroke="var(--color-accent-amber)" strokeWidth="2" />
+                          <text x="330" y="60" textAnchor="middle" dominantBaseline="middle" fontSize="9" fontFamily="var(--font-mono)" fontWeight="bold" fill="var(--color-accent-amber)">AI PIPELINE</text>
+                          <text x="330" y="72" textAnchor="middle" dominantBaseline="middle" fontSize="7" fontFamily="var(--font-mono)" fill="var(--color-text-dim)">[Recon+Denoise]</text>
+
+                          <line x1="380" y1="67" x2="400" y2="67" stroke="var(--color-accent-amber)" strokeWidth="1.5" markerEnd="url(#arrow)" />
+
+                          {/* Diagnosis */}
+                          <rect x="405" y="45" width="85" height="92" rx="3" fill="var(--color-accent-blue)" stroke="#1a252f" strokeWidth="1.5" />
+                          <text x="447" y="65" textAnchor="middle" dominantBaseline="middle" fontSize="9" fontFamily="var(--font-mono)" fontWeight="bold" fill="#fff">DIAGNOSTIC</text>
+                          <text x="447" y="77" textAnchor="middle" dominantBaseline="middle" fontSize="9" fontFamily="var(--font-mono)" fontWeight="bold" fill="#fff">ENGINE</text>
+                          <text x="447" y="93" textAnchor="middle" dominantBaseline="middle" fontSize="7" fontFamily="var(--font-mono)" fill="#ddeee7">S4 SSM Branch</text>
+                          <text x="447" y="103" textAnchor="middle" dominantBaseline="middle" fontSize="7" fontFamily="var(--font-mono)" fill="#ddeee7">Conv2D Branch</text>
+                          <text x="447" y="121" textAnchor="middle" dominantBaseline="middle" fontSize="9" fontFamily="var(--font-mono)" fontWeight="bold" fill="#00ffff">11 PATHOLOGY</text>
+
+                          <line x1="360" y1="120" x2="405" y2="120" stroke="var(--color-accent-green)" strokeWidth="1.5" markerEnd="url(#arrow)" />
+                        </svg>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Bottom: Detailed pathology table */}
+                  <div style={{ gridColumn: 'span 2', border: '1px solid var(--color-panel-border)', background: '#fff' }}>
+                    <div className="panel-header" style={{ borderBottom: '1px solid var(--color-panel-border)' }}>
+                      <span>Pathology Database Risk Matrix</span>
+                    </div>
+                    <div style={{ maxHeight: '180px', overflowY: 'auto' }}>
+                      <table className="clinical-table" style={{ fontSize: '11px' }}>
+                        <thead>
+                          <tr>
+                            <th>Pathology Class</th>
+                            <th>Total Cases</th>
+                            <th>Relative Frequency (%)</th>
+                            <th>Trigger Rate (%)</th>
+                            <th>Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {Object.entries(pathologyCounts).map(([k, count]) => {
+                            const pct = total > 0 ? (count / total) * 100 : 0
+                            const isNormal = k === 'Normal'
+                            const triggerRate = isNormal ? 0 : 100
+                            return (
+                              <tr key={k}>
+                                <td style={{ fontWeight: count > 0 ? 'bold' : 'normal', textTransform: 'uppercase' }}>
+                                  {k.replace(/_/g, ' ')}
+                                </td>
+                                <td style={{ fontFamily: 'var(--font-mono)' }}>{count}</td>
+                                <td style={{ fontFamily: 'var(--font-mono)' }}>{pct.toFixed(1)}%</td>
+                                <td style={{ fontFamily: 'var(--font-mono)', color: isNormal ? 'var(--color-accent-green)' : 'var(--color-accent-amber)' }}>
+                                  {triggerRate}%
+                                </td>
+                                <td>
+                                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: isNormal ? 'var(--color-accent-green)' : count > 0 ? 'var(--color-accent-red)' : 'var(--color-text-dim)' }}>
+                                    <span className={`status-pill ${isNormal ? 'green' : count > 0 ? 'red' : 'yellow'}`} style={{ animation: 'none' }} />
+                                    {isNormal ? 'NORMAL' : count > 0 ? 'PREVALENT' : 'UNOBSERVED'}
+                                  </span>
+                                </td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+            </>
+          )
+        })()}
       </main>
 
       {/* ── Footer log bar ── */}

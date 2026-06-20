@@ -18,16 +18,16 @@ namespace kvision {
 
 static const char* kPathologyLabels[] = {
     "Normal",
-    "Edema",
     "Tumor (Glioma)",
-    "Tumor (Meningioma)",
-    "Hemorrhage",
     "Ischemia",
     "MS Lesions",
-    "Atrophy",
     "Hydrocephalus",
+    "Atrophy",
+    "Hemorrhage",
+    "Cerebral Cyst",
+    "Edema",
     "AVM",
-    "Abscess"
+    "Cerebral Microbleeds"
 };
 
 const char* pathology_label(Pathology p) {
