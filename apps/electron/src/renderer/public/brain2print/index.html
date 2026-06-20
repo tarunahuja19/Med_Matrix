@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="./niivue.css" />
+  <link rel="manifest" href="./manifest.json" />
+  <title>brain2print</title>
+  <script type="module" crossorigin src="./assets/index-B4xvmLrE.js"></script>
+</head>
+
+<body>
+  <header>
+    <label><strong>Visualization:</strong></label>
+    &nbsp;
+    <label for="clipCheck">Clip Plane</label>
+    <input type="checkbox" id="clipCheck" unchecked />
+    <label for="opacitySlider0">Background Opacity</label>
+    <input title="Control transparency of grayscale voxel-based image" type="range" min="0" max="255" value="255" class="slider" id="opacitySlider0" />
+    &nbsp;
+    <label for="opacitySlider1">Overlay Opacity</label>
+    <input title="Control transparency of colored voxel-based segmentation" type="range" min="0" max="255" value="128" class="slider" id="opacitySlider1" />
+    &nbsp;
+    <br>
+    <label><strong>Generation:</strong></label>
+    &nbsp;&nbsp;&nbsp;&nbsp;
+    <label for="modelSelect">Segmentation Model</label>
+    <select id="modelSelect">
+    </select>
+    &nbsp;
+    <label for="scalarCheck" hidden>Scalar</label>
+    <input type="checkbox" id="scalarCheck" hidden unchecked />
+    &nbsp;
+    <button disabled id="createMeshBtn">Create Mesh</button>
+    &nbsp;
+    <br>
+    <label><strong>Save results:</strong></label>
+    &nbsp;&nbsp;
+    <button disabled id="saveBtn">Save Image</button>
+    &nbsp;
+    <button disabled id="saveMeshBtn">Save Mesh</button>
+    &nbsp;
+    <br>
+    <button id="aboutBtn">About</button>
+    <div id="loadingCircle" class="loading-circle hidden"></div>
+    <label id="meshProcessingMsg" class="hidden"></label>
+
+  </header>
+  <main id="canvas-container">
+    <canvas id="gl1"></canvas>
+  </main>
+  <footer>
+    <div class="footer">
+      <table class="footer">
+        <tr>
+          <th id="location">Drag and Drop any NIfTI image</th>
+          <th><progress id="modelProgress" value="0" max="100"> 32% </progress></th>
+          <th>
+            <!-- important to use class footer here -->
+            <div class="footer" id="memstatus" style="color: green">Memory OK</div>
+          </th>
+        </tr>
+      </table>
+    </div>
+  </footer>
+  <dialog id="remeshDialog">
+    <form method="dialog">
+      <p>
+        <label>
+          Quality:
+          <select id="qualitySelect" title="choose better or faster meshing">
+            <option value="0">faster (can create defects)</option>
+            <option value="1" selected>better</option>
+          </select>
+        </label>
+      </p>
+      <p id="largestClusterGroup">
+        <label>&nbsp;Largest cluster only</label><input type="checkbox" id="largestCheck" unchecked/>
+      </p>
+      <p id="hollowGroup">
+        <label>
+          &nbsp;Hollow:
+          <select id="hollowSelect" title="hollow meshes require less material but may be fragile">
+            <option value="0" selected>False: solid</option>
+            <option value="-2">2mm</option>
+            <option value="-3">3mm</option>
+            <option value="-4">4mm</option>
+            <option value="-8">8mm</option>
+            <option value="-16">16mm</option>
+          </select>
+        </label>
+      </p>
+      <p id="bubbleGroup">
+        <label>&nbsp;Fill bubbles</label><input type="checkbox" id="bubbleCheck" unchecked/>
+      </p>
+      <p id="closeGroup">
+        <label>Closing (mm)</label>
+        <input id="closeMM" type="number" min="0"  value="4" max="100">
+      </p>
+      <p>
+        <label for="smoothSlide">Smoothing</label>
+        <input
+          type="range"
+          min="0"
+          max="30"
+          value="3"
+          class="slider"
+          id="smoothSlide"
+          title="smoothing makes the mesh less jagged but requires longer computation"
+        />
+      </p>
+      <p>
+        <label>Simplify Percent (10..100)</label>
+        <input title="triangle reduction reduces the file size and computation time but can reduce mesh quality, smaller values result in a smaller mesh" id="shrinkPct" type="number" min="10"  value="25" max="100">
+      </p>
+      <button id="cancelBtn" formmethod="dialog">Cancel</button>
+      <button autofocus id="applyBtn" value="default">Apply</button>
+    </form>
+  </dialog>
+  <dialog id="saveDialog">
+    <form method="dialog">
+      <p>
+        <label>
+          Format:
+          <select id="formatSelect">
+            <option>MZ3 small and precise</option>
+            <option>OBJ widely supported</option>
+            <option selected>STL popular for printing</option>
+          </select>
+        </label>
+      </p>
+      <p>
+        <select id="scaleSelect">
+          <option value="4">1:4 Quarter Scale</option>
+          <option value="3">1:3 Third Scale</option>
+          <option value="2">1:2 Half Scale</option>
+          <option value="1" selected>1:1 Full Scale</option>
+        </select>
+      </p>
+      <button id="cancelSaveBtn" formmethod="dialog">Cancel</button>
+      <button autofocus id="applySaveBtn" value="default">Save</button>
+    </form>
+  </dialog>
+</body>
+
+</html>

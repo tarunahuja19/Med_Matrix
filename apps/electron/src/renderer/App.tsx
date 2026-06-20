@@ -53,7 +53,7 @@ interface AIFindings {
 }
 
 // ── Tabs ─────────────────────────────────────────────────────────────────────
-type Tab = 'ingest' | 'archive' | 'patients' | 'reports'
+type Tab = 'ingest' | 'archive' | 'patients' | 'reports' | 'brain3d'
 
 const API = 'http://localhost:3000'
 
@@ -75,6 +75,7 @@ function statusPillClass(s: string) {
 export default function App() {
   // navigation
   const [tab, setTab] = useState<Tab>('ingest')
+  const [brain3dSelectedPatientId, setBrain3dSelectedPatientId] = useState<string>('')
 
   // data
   const [patients, setPatients] = useState<Patient[]>([])
@@ -343,6 +344,7 @@ export default function App() {
     { id: 'archive', label: 'Study Archive' },
     { id: 'patients', label: 'Patients' },
     { id: 'reports', label: 'AI Reports' },
+    { id: 'brain3d', label: '3D Brain Model' },
   ]
 
   return (
@@ -1083,6 +1085,182 @@ export default function App() {
                     Select a report from the index to view details.
                   </div>
                 )}
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* ═══════════════════════════════════ 3D BRAIN MODEL TAB ══════════════════════════════════ */}
+        {tab === 'brain3d' && (
+          <>
+            {/* Left: Patient selection and clinical summary */}
+            <div className="syngo-panel">
+              <div className="panel-header">
+                <span>Patient Explorer</span>
+                <span style={{ fontFamily: 'var(--font-mono)' }}>[PT-3D]</span>
+              </div>
+              <div className="panel-body" style={{ display: 'flex', flexDirection: 'column', gap: '14px', overflowY: 'auto' }}>
+                {/* Selector */}
+                <div>
+                  <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text-dim)', textTransform: 'uppercase', marginBottom: '6px' }}>
+                    Active Patient
+                  </div>
+                  <select
+                    value={brain3dSelectedPatientId}
+                    onChange={(e) => setBrain3dSelectedPatientId(e.target.value)}
+                    style={{ width: '100%', padding: '6px 8px', fontFamily: 'var(--font-mono)', fontSize: '12px', background: '#e4e7e9', border: '1px solid var(--color-panel-border)', color: 'var(--color-text-main)' }}
+                  >
+                    <option value="">— Select Patient —</option>
+                    {patients.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} ({new Date(p.dateOfBirth).getFullYear()}, {p.gender})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* If selected, show detailed information */}
+                {(() => {
+                  const selectedPatient = patients.find(p => p.id === brain3dSelectedPatientId)
+                  if (!selectedPatient) {
+                    return (
+                      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', color: 'var(--color-text-dim)', fontStyle: 'italic', padding: '20px' }}>
+                        Please select a patient from the index above to display clinical records and load the 3D model.
+                      </div>
+                    )
+                  }
+
+                  // Find patient's studies
+                  const patientStudies = studies.filter(s => s.patientId === selectedPatient.id)
+                  // Find patient's reports
+                  const patientReports = reports.filter(r => r.study?.patientId === selectedPatient.id)
+
+                  return (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                      {/* Demographic card */}
+                      <div style={{ background: '#d1dadf', border: '1px solid var(--color-panel-border)', padding: '10px 12px' }}>
+                        <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--color-accent-blue)', marginBottom: '6px' }}>
+                          Demographics
+                        </div>
+                        <div className="detail-grid" style={{ marginBottom: 0 }}>
+                          <span className="detail-label">Name:</span>
+                          <span className="detail-val" style={{ fontWeight: 600 }}>{selectedPatient.name}</span>
+                          <span className="detail-label">Patient ID:</span>
+                          <span className="detail-val" style={{ fontFamily: 'var(--font-mono)', fontSize: '10px' }}>{selectedPatient.id}</span>
+                          <span className="detail-label">DOB:</span>
+                          <span className="detail-val">{new Date(selectedPatient.dateOfBirth).toLocaleDateString()}</span>
+                          <span className="detail-label">Gender:</span>
+                          <span className="detail-val" style={{ textTransform: 'uppercase' }}>{selectedPatient.gender}</span>
+                        </div>
+                      </div>
+
+                      {/* Imaging Studies Card */}
+                      <div>
+                        <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text-dim)', textTransform: 'uppercase', marginBottom: '6px' }}>
+                          Acquisition History
+                        </div>
+                        {patientStudies.length === 0 ? (
+                          <div style={{ fontSize: '11px', fontStyle: 'italic', color: 'var(--color-text-dim)', padding: '6px' }}>
+                            No studies found for this patient.
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                            {patientStudies.map(s => (
+                              <div key={s.id} style={{ background: '#f5f7f8', border: '1px solid var(--color-panel-border)', padding: '8px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600, fontSize: '11px' }}>
+                                  <span style={{ color: 'var(--color-accent-blue)' }}>{s.modality} Scan</span>
+                                  <span style={{ color: statusColor(s.status) }}>{s.status.toUpperCase()}</span>
+                                </div>
+                                <div style={{ fontSize: '10px', color: 'var(--color-text-dim)', marginTop: '4px' }}>
+                                  Date: {new Date(s.studyDate).toLocaleString()}
+                                </div>
+                                <div style={{ fontSize: '9px', fontFamily: 'var(--font-mono)', color: 'var(--color-text-dim)', marginTop: '2px', wordBreak: 'break-all' }}>
+                                  ID: {s.id}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* AI Report Card */}
+                      <div>
+                        <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text-dim)', textTransform: 'uppercase', marginBottom: '6px' }}>
+                          AI Diagnostic Findings
+                        </div>
+                        {patientReports.length === 0 ? (
+                          <div style={{ fontSize: '11px', fontStyle: 'italic', color: 'var(--color-text-dim)', padding: '6px' }}>
+                            No reports generated yet.
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                            {patientReports.map(r => {
+                              const f = parseFindings(r.findings)
+                              return (
+                                <div key={r.id} style={{ border: '1px solid var(--color-panel-border)', background: '#f5f7f8', padding: '8px' }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', fontWeight: 600, marginBottom: '6px' }}>
+                                    <span>AI Report</span>
+                                    <span style={{ color: r.status === 'final' ? 'var(--color-accent-green)' : 'var(--color-accent-amber)' }}>
+                                      {r.status.toUpperCase()}
+                                    </span>
+                                  </div>
+                                  {f ? (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '11px' }}>
+                                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                        <span>Anomaly:</span>
+                                        <span style={{ fontWeight: 600, color: f.anomalyDetected ? 'var(--color-accent-red)' : 'var(--color-accent-green)' }}>
+                                          {f.anomalyDetected ? '⚠ DETECTED' : '✓ NONE'}
+                                        </span>
+                                      </div>
+                                      {f.predictedPathology && (
+                                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                          <span>AI Diagnosis:</span>
+                                          <span style={{ fontWeight: 600, color: f.predictedPathology === 'Normal' ? 'var(--color-accent-green)' : 'var(--color-accent-red)' }}>
+                                            {f.predictedPathology.replace(/_/g, ' ')}
+                                          </span>
+                                        </div>
+                                      )}
+                                      {f.confidence && (
+                                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                          <span>Confidence:</span>
+                                          <span>{(f.confidence * 100).toFixed(1)}%</span>
+                                        </div>
+                                      )}
+                                      {f.note && (
+                                        <div style={{ marginTop: '4px', padding: '4px 6px', background: '#ebeeef', fontSize: '10px', fontStyle: 'italic', borderLeft: '2px solid var(--color-accent-blue)' }}>
+                                          {f.note}
+                                        </div>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <div style={{ fontSize: '10px', fontStyle: 'italic', color: 'var(--color-text-dim)' }}>
+                                      Pending analysis / No AI findings data.
+                                    </div>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })()}
+              </div>
+            </div>
+
+            {/* Right: 3D model frame */}
+            <div className="syngo-panel">
+              <div className="panel-header">
+                <span>Interactive 3D Brain Reconstruction (brain2print)</span>
+                <span style={{ fontFamily: 'var(--font-mono)' }}>[3D-MESH-GENERATOR]</span>
+              </div>
+              <div className="panel-body" style={{ padding: 0, height: '100%', overflow: 'hidden' }}>
+                <iframe
+                  src="./brain2print/index.html"
+                  style={{ width: '100%', height: '100%', border: 'none' }}
+                  title="brain2print 3D Brain Model"
+                />
               </div>
             </div>
           </>
