@@ -365,19 +365,17 @@ def predict(request: PredictRequest):
         )
 
         # ── Step 6 (conditional): Full pipeline if anomaly detected ────────
-        reconstructed_key: str | None = None
+        # ── Step 6: Save and upload reconstructed volume (always) ────────
+        reconstructed_key = f"{request.study_id}/reconstructed.npy"
+        local_reconstructed_path = os.path.join(tmpdir, "reconstructed.npy")
         artifact_report: dict | None = None
 
         if anomaly_detected:
-            logger.info("[predict] Anomaly detected — running full image pipeline...")
-            local_reconstructed_path = os.path.join(tmpdir, "reconstructed.npy")
-            reconstructed_key = f"{request.study_id}/reconstructed.npy"
-
+            logger.info("[predict] Anomaly detected — running full image pipeline (motion correction + denoise)...")
             try:
                 corrected = correct_motion(reconstructed)
                 denoised = denoise_image(corrected, method=request.denoise_method)
 
-                # Artifact report on denoised image
                 if denoised.ndim == 3:
                     artifact_img = np.mean(denoised, axis=0)
                 elif denoised.ndim == 4:
@@ -387,18 +385,41 @@ def predict(request: PredictRequest):
 
                 artifact_report = detect_artifacts(artifact_img)
 
-                # Upload to MinIO
+                # Save denoised/motion corrected version
                 np.save(local_reconstructed_path, denoised)
                 minio_client.fput_object(
                     bucket_name="reconstructed",
                     object_name=reconstructed_key,
                     file_path=local_reconstructed_path,
                 )
-                logger.info(f"[predict] Reconstructed image uploaded: {reconstructed_key}")
+                logger.info(f"[predict] Anomaly-corrected image uploaded: {reconstructed_key}")
             except Exception as e:
                 logger.error(f"[predict] Image pipeline failed: {e}")
-                # Non-fatal: return gating result even if image pipeline fails
                 artifact_report = {"error": str(e)}
+                # Fallback to saving base reconstruction
+                try:
+                    np.save(local_reconstructed_path, reconstructed)
+                    minio_client.fput_object(
+                        bucket_name="reconstructed",
+                        object_name=reconstructed_key,
+                        file_path=local_reconstructed_path,
+                    )
+                except Exception as ex:
+                    logger.error(f"[predict] Fallback base image upload failed: {ex}")
+                    reconstructed_key = None
+        else:
+            logger.info("[predict] Clean scan — uploading base reconstruction directly...")
+            try:
+                # Save clean base reconstruction directly (skip motion correction and denoise to save compute)
+                np.save(local_reconstructed_path, reconstructed)
+                minio_client.fput_object(
+                    bucket_name="reconstructed",
+                    object_name=reconstructed_key,
+                    file_path=local_reconstructed_path,
+                )
+                logger.info(f"[predict] Base reconstructed image uploaded: {reconstructed_key}")
+            except Exception as e:
+                logger.error(f"[predict] Base image upload failed: {e}")
                 reconstructed_key = None
 
         # ── Step 6b: Pathology Prediction (Fused S4-CNN) ───────────────────
