@@ -48,6 +48,9 @@ export interface PredictResponse {
   gating_decision: GatingDecisionPayload
   reconstructed_key: string | null
   artifact_report: Record<string, number> | null
+  predicted_pathology: string | null
+  pathology_confidence: number | null
+  pathology_probabilities: Record<string, number> | null
   message: string | null
 }
 
@@ -61,6 +64,9 @@ export interface AIInferenceResult {
   imageEncoderTriggered: boolean
   reconstructedKey: string | null
   artifactReport: Record<string, number> | null
+  predictedPathology: string | null
+  pathologyConfidence: number | null
+  pathologyProbabilities: Record<string, number> | null
 }
 
 // ---------------------------------------------------------------------------
@@ -106,9 +112,17 @@ export class AIServiceClient {
       throw new Error(`AI-service /predict network error: ${String(err)}`)
     }
 
-    const { anomaly_scores, gating_decision, reconstructed_key, artifact_report } = data
+    const {
+      anomaly_scores,
+      gating_decision,
+      reconstructed_key,
+      artifact_report,
+      predicted_pathology,
+      pathology_confidence,
+      pathology_probabilities,
+    } = data
 
-    // ── 2. Persist ModelResult ──────────────────────────────────────────────
+    // ── 2. Persist ModelResult (Anomaly Detection) ──────────────────────────
     const modelResult = await prisma.modelResult.create({
       data: {
         studyId: req.study_id,
@@ -145,6 +159,23 @@ export class AIServiceClient {
       },
     })
 
+    // ── 5. Persist Pathology ModelResult (fused-s4-cnn) ──────────────────────
+    if (predicted_pathology !== null) {
+      await prisma.modelResult.create({
+        data: {
+          studyId: req.study_id,
+          modelName: 'fused-s4-cnn',
+          modelVersion: 'v1',
+          rawScores: JSON.stringify({
+            predictedPathology: predicted_pathology,
+            probabilities: pathology_probabilities,
+          }),
+          confidenceScore: pathology_confidence ?? 0.0,
+          reconstructedKey: reconstructed_key ?? null, // Link to the same reconstructed slice
+        },
+      })
+    }
+
     return {
       modelResultId: modelResult.id,
       anomalyDetected: gating_decision.anomaly_detected,
@@ -152,6 +183,9 @@ export class AIServiceClient {
       imageEncoderTriggered: gating_decision.image_encoder_triggered,
       reconstructedKey: reconstructed_key ?? null,
       artifactReport: artifact_report ?? null,
+      predictedPathology: predicted_pathology,
+      pathologyConfidence: pathology_confidence,
+      pathologyProbabilities: pathology_probabilities,
     }
   }
 }

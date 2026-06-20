@@ -1,7 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog } from 'electron'
 import path from 'path'
 import fs from 'fs'
-import FormData from 'form-data'
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -36,24 +35,30 @@ ipcMain.handle('dialog:openFile', async () => {
 })
 
 // IPC: upload K-space study — reads file from disk and POSTs to backend
-// Accepts optional metadata: patientId, modality, studyDate
-ipcMain.handle('study:upload', async (_event, filePath: string, meta?: { patientId?: string; modality?: string; studyDate?: string }) => {
+// Accepts optional metadata: patientId, modality, studyDate, phaseCorrection, denoiseMethod
+ipcMain.handle('study:upload', async (_event, filePath: string, meta?: { patientId?: string; modality?: string; studyDate?: string; phaseCorrection?: string; denoiseMethod?: string }) => {
   try {
     const fileBuffer = fs.readFileSync(filePath)
     const fileName = path.basename(filePath)
+    const fileBlob = new Blob([fileBuffer])
 
-    const form = new FormData()
+    const form = new globalThis.FormData()
     // Backend expects field name 'kspace'
-    form.append('kspace', fileBuffer, { filename: fileName, contentType: 'application/octet-stream' })
+    form.append('kspace', fileBlob, fileName)
     // Required fields — use sensible defaults if not provided
     form.append('patientId', meta?.patientId ?? '')
     form.append('modality', meta?.modality ?? 'MRI')
     form.append('studyDate', meta?.studyDate ?? new Date().toISOString())
+    if (meta?.phaseCorrection !== undefined) {
+      form.append('phaseCorrection', meta.phaseCorrection)
+    }
+    if (meta?.denoiseMethod !== undefined) {
+      form.append('denoiseMethod', meta.denoiseMethod)
+    }
 
     const response = await fetch('http://localhost:3000/studies/upload', {
       method: 'POST',
-      body: form as any,
-      headers: form.getHeaders()
+      body: form,
     })
 
     const data = await response.json()

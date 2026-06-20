@@ -54,22 +54,20 @@ async function processStudy(job: Job<StudyJobData>): Promise<void> {
 
   // ── 80%: Create draft report ──────────────────────────────────────────────
   // Build findings string from inference result
-  const findingsSummary = inferenceResult.anomalyDetected
-    ? JSON.stringify({
-        anomalyDetected: true,
-        confidence: inferenceResult.confidence,
-        imageEncoderTriggered: inferenceResult.imageEncoderTriggered,
-        reconstructedKey: inferenceResult.reconstructedKey,
-        artifactScores: inferenceResult.artifactReport,
-        modelResultId: inferenceResult.modelResultId,
-      })
-    : JSON.stringify({
-        anomalyDetected: false,
-        confidence: inferenceResult.confidence,
-        imageEncoderTriggered: false,
-        note: 'K-Space anomaly score below threshold — image encoder not triggered.',
-        modelResultId: inferenceResult.modelResultId,
-      })
+  const findingsSummary = JSON.stringify({
+    anomalyDetected: inferenceResult.anomalyDetected,
+    confidence: inferenceResult.confidence,
+    imageEncoderTriggered: inferenceResult.imageEncoderTriggered,
+    reconstructedKey: inferenceResult.reconstructedKey,
+    artifactScores: inferenceResult.artifactReport,
+    modelResultId: inferenceResult.modelResultId,
+    predictedPathology: inferenceResult.predictedPathology,
+    pathologyConfidence: inferenceResult.pathologyConfidence,
+    pathologyProbabilities: inferenceResult.pathologyProbabilities,
+    note: inferenceResult.anomalyDetected
+      ? undefined
+      : 'K-Space anomaly score below threshold — image encoder not triggered.',
+  })
 
   await prisma.report.create({
     data: {

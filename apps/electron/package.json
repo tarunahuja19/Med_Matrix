@@ -5,7 +5,7 @@
   "main": "out/main/index.js",
   "scripts": {
     "dev:renderer": "vite",
-    "dev:main": "tsc -p tsconfig.main.json && electron out/main/index.js",
+    "dev:main": "tsc -p tsconfig.main.json && tsc src/preload/index.ts --module commonjs --outDir out/preload --skipLibCheck && electron out/main/index.js",
     "dev": "concurrently \"pnpm dev:renderer\" \"pnpm dev:main\""
   },
   "keywords": [],

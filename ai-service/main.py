@@ -11,6 +11,8 @@ from motion_correction import correct_motion
 from denoiser import denoise_image
 from artifact_detector import detect_artifacts
 import numpy as np
+import torch
+from fused_model import FusedS4CNNClassifier
 
 # Phase 2 — Pydantic schemas for /predict
 from models import (
@@ -195,6 +197,63 @@ def reconstruct(request: ReconstructRequest):
         )
 
 
+# Pathology Classes (11 Types matching kvision_inference.h / index.md)
+PATHOLOGY_CLASSES = [
+    "Normal",
+    "Edema",
+    "Tumor_Glioma",
+    "Tumor_Meningioma",
+    "Hemorrhage",
+    "Ischemia",
+    "MS_Lesions",
+    "Atrophy",
+    "Hydrocephalus",
+    "AVM",
+    "Abscess"
+]
+
+_PATHOLOGY_MODEL = None
+
+def get_pathology_model():
+    global _PATHOLOGY_MODEL
+    if _PATHOLOGY_MODEL is not None:
+        return _PATHOLOGY_MODEL
+        
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # Look for fused_model.pt in the same folder
+    weights_path = os.path.join(os.path.dirname(__file__), 'fused_model.pt')
+    
+    model = FusedS4CNNClassifier(
+        d_model_s4=128,
+        d_state_s4=16,
+        n_layers_s4=2,
+        d_model_cnn=128,
+        num_classes=11,
+        input_dim_s4=128 * 128,  # Resolution is 128
+        d_attn=128
+    )
+    
+    if os.path.exists(weights_path):
+        try:
+            state_dict = torch.load(weights_path, map_location=device)
+            # Remove module. prefix if present (due to nn.DataParallel)
+            new_state_dict = {}
+            for k, v in state_dict.items():
+                name = k[7:] if k.startswith('module.') else k
+                new_state_dict[name] = v
+            model.load_state_dict(new_state_dict, strict=False)
+            logger.info(f"Successfully loaded Fused S4-CNN pathology model from {weights_path}")
+        except Exception as e:
+            logger.error(f"Error loading pathology model weights: {e}")
+    else:
+        logger.warning(f"Pathology model weights not found at {weights_path}")
+        
+    model = model.to(device)
+    model.eval()
+    _PATHOLOGY_MODEL = model
+    return _PATHOLOGY_MODEL
+
+
 # ---------------------------------------------------------------------------
 # Phase 2 — /predict
 # K-Space anomaly detection + gating logic
@@ -341,6 +400,67 @@ def predict(request: PredictRequest):
                 artifact_report = {"error": str(e)}
                 reconstructed_key = None
 
+        # ── Step 6b: Pathology Prediction (Fused S4-CNN) ───────────────────
+        predicted_pathology = None
+        pathology_confidence = None
+        pathology_probs = None
+
+        try:
+            logger.info("[predict] Running Fused S4-CNN pathology classifier...")
+            pathology_model = get_pathology_model()
+
+            # Preprocess K-space: raw shape is [slices, coils, height, width]
+            # Convert to [1, 64, 1, 128, 128] complex64 tensor
+
+            # Reduce coils to 1 if multiple coils present
+            if kspace.ndim == 4:
+                kspace_reduced = np.mean(kspace, axis=1, keepdims=True)
+            elif kspace.ndim == 3:
+                kspace_reduced = np.expand_dims(kspace, axis=1)
+            elif kspace.ndim == 2:
+                kspace_reduced = np.expand_dims(np.expand_dims(kspace, axis=0), axis=0)
+            else:
+                kspace_reduced = kspace
+
+            x_complex = kspace_reduced.astype(np.complex64)
+            x_tensor = torch.from_numpy(x_complex).unsqueeze(0) # [1, slices, 1, H, W]
+
+            # Resample slice dimension to 64 and spatial dimensions to 128x128
+            x_real = torch.real(x_tensor)
+            x_imag = torch.imag(x_tensor)
+
+            real_interp = torch.nn.functional.interpolate(
+                x_real, size=(64, 128, 128), mode='trilinear', align_corners=False
+            )
+            imag_interp = torch.nn.functional.interpolate(
+                x_imag, size=(64, 128, 128), mode='trilinear', align_corners=False
+            )
+
+            # [1, 1, 64, 128, 128]
+            x_interp = torch.complex(real_interp, imag_interp)
+
+            # Permute to [B=1, S=64, C=1, H=128, W=128]
+            x_final = x_interp.permute(0, 2, 1, 3, 4)
+
+            device = next(pathology_model.parameters()).device
+            x_final = x_final.to(device)
+
+            with torch.no_grad():
+                logits = pathology_model(x_final)
+                probs = torch.softmax(logits, dim=-1).squeeze(0)
+                pred_idx = int(torch.argmax(logits, dim=-1).item())
+
+                predicted_pathology = PATHOLOGY_CLASSES[pred_idx]
+                pathology_confidence = float(probs[pred_idx].item())
+                pathology_probs = {
+                    PATHOLOGY_CLASSES[i]: float(probs[i].item())
+                    for i in range(len(PATHOLOGY_CLASSES))
+                }
+
+            logger.info(f"[predict] Pathology prediction complete: {predicted_pathology} (conf={pathology_confidence:.4f})")
+        except Exception as e:
+            logger.error(f"[predict] Pathology classification failed: {e}")
+
         # ── Step 7: Return response ────────────────────────────────────────
         return PredictResponse(
             status="success",
@@ -349,5 +469,8 @@ def predict(request: PredictRequest):
             gating_decision=gating,
             reconstructed_key=reconstructed_key,
             artifact_report=artifact_report,
+            predicted_pathology=predicted_pathology,
+            pathology_confidence=pathology_confidence,
+            pathology_probabilities=pathology_probs,
             message=reason,
         )

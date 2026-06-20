@@ -82,4 +82,7 @@ class PredictResponse(BaseModel):
         default=None,
         description="Full artifact report dict (only present when image encoder ran)",
     )
+    predicted_pathology: Optional[str] = Field(default=None, description="Predicted pathology class name")
+    pathology_confidence: Optional[float] = Field(default=None, description="Softmax confidence score for pathology prediction")
+    pathology_probabilities: Optional[dict] = Field(default=None, description="Full map of pathology class probabilities")
     message: Optional[str] = None

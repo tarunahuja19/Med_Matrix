@@ -56,7 +56,15 @@ app.use('/studies', studiesRouter)
 
 // ── Reports ──────────────────────────────────────────────────────────────────
 app.get('/reports', async (_req, res) => {
-  const reports = await prisma.report.findMany({ include: { study: true } })
+  const reports = await prisma.report.findMany({
+    include: {
+      study: {
+        include: {
+          patient: true,
+        },
+      },
+    },
+  })
   res.json(reports)
 })
 

@@ -47,6 +47,9 @@ interface AIFindings {
   artifactScores?: Record<string, number>
   modelResultId?: string
   note?: string
+  predictedPathology?: string
+  pathologyConfidence?: number
+  pathologyProbabilities?: Record<string, number>
 }
 
 // ── Tabs ─────────────────────────────────────────────────────────────────────
@@ -80,6 +83,8 @@ export default function App() {
 
   // ingest panel state
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null)
+  const [selectedFileObject, setSelectedFileObject] = useState<File | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [selectedPatientId, setSelectedPatientId] = useState<string>('')
   const [modality, setModality] = useState<string>('MRI')
   const [studyDate, setStudyDate] = useState<string>(new Date().toISOString().split('T')[0])
@@ -180,16 +185,25 @@ export default function App() {
   }
 
   // ── File selection ──────────────────────────────────────────────────────────
+  const handleBrowserFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      setSelectedFileObject(file)
+      setSelectedFilePath(file.name)
+      addLog(`Browser select: K-space file ${file.name} loaded.`)
+    }
+  }
+
   const handleSelectFile = async () => {
     if (!(window as any).api) {
-      setSelectedFilePath('C:\\Simulation\\KSPACE\\test_brain_t2.npy')
-      addLog('Simulation: K-space file selected.')
+      fileInputRef.current?.click()
       return
     }
     try {
       const path = await (window as any).api.openFileDialog()
       if (path) {
         setSelectedFilePath(path)
+        setSelectedFileObject(null) // clear browser file reference
         addLog(`K-space file selected: ${path.split('\\').pop()}`)
       }
     } catch (e: any) { addLog(`File selection error: ${e.message}`) }
@@ -197,7 +211,7 @@ export default function App() {
 
   // ── Upload / ingest ─────────────────────────────────────────────────────────
   const handleUpload = async () => {
-    if (!selectedFilePath) { addLog('No file selected.'); return }
+    if (!selectedFilePath && !selectedFileObject) { addLog('No file selected.'); return }
     if (!selectedPatientId) { addLog('ERROR: Select a patient before ingesting.'); return }
 
     setUploading(true)
@@ -206,14 +220,53 @@ export default function App() {
     addLog(`Initiating K-space ingestion for patient ${selectedPatientId}`)
 
     if (!(window as any).api) {
-      // Simulation mode
-      setTimeout(() => {
-        setUploading(false)
-        setSelectedFilePath(null)
-        setUploadStatus('Ingested (simulated)')
-        addLog('Simulation: Study queued for AI processing.')
-        fetchStudies()
-      }, 2000)
+      if (selectedFileObject) {
+        try {
+          const form = new FormData()
+          form.append('kspace', selectedFileObject)
+          form.append('patientId', selectedPatientId)
+          form.append('modality', modality)
+          form.append('studyDate', new Date(studyDate).toISOString())
+          form.append('phaseCorrection', String(phaseCorrection))
+          form.append('denoiseMethod', denoiseMethod)
+
+          const response = await fetch(`${API}/studies/upload`, {
+            method: 'POST',
+            body: form
+          })
+
+          const data = await response.json()
+          if (!response.ok) {
+            setUploading(false)
+            setUploadStatus(`Error: ${data.error || 'Upload failed'}`)
+            addLog(`Ingestion failed: ${data.error || 'Upload failed'}`)
+            return
+          }
+
+          const { studyId, jobId } = data
+          setActiveStudyId(studyId)
+          setActiveJobId(jobId)
+          setUploadStatus('Queued — AI pipeline running...')
+          addLog(`Study ${studyId} queued (job ${jobId}). Polling for progress...`)
+          setSelectedFilePath(null)
+          setSelectedFileObject(null)
+          if (fileInputRef.current) fileInputRef.current.value = ''
+          startPolling(studyId, jobId)
+        } catch (e: any) {
+          setUploading(false)
+          setUploadStatus(`Error: ${e.message}`)
+          addLog(`System fault: ${e.message}`)
+        }
+      } else {
+        // Simulation mode fallback
+        setTimeout(() => {
+          setUploading(false)
+          setSelectedFilePath(null)
+          setUploadStatus('Ingested (simulated)')
+          addLog('Simulation: Study queued for AI processing.')
+          fetchStudies()
+        }, 2000)
+      }
       return
     }
 
@@ -423,11 +476,18 @@ export default function App() {
                 </div>
 
                 {/* File picker */}
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleBrowserFileChange}
+                  style={{ display: 'none' }}
+                  accept=".npy,.h5,.dat,.dcm,DCM"
+                />
                 <div className="bevel-inset" style={{ padding: '8px', background: '#e4e7e9', minHeight: '56px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
                   {selectedFilePath ? (
                     <div>
                       <div style={{ fontWeight: 'bold', fontSize: '11px', color: 'var(--color-accent-blue)', textTransform: 'uppercase', marginBottom: '2px' }}>Target K-space file:</div>
-                      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', wordBreak: 'break-all' }}>{selectedFilePath.split('\\').pop()}</div>
+                      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', wordBreak: 'break-all' }}>{selectedFilePath.split('\\').pop() || selectedFilePath.split('/').pop()}</div>
                       <div style={{ fontSize: '10px', color: 'var(--color-text-dim)', marginTop: '2px', wordBreak: 'break-all' }}>{selectedFilePath}</div>
                     </div>
                   ) : (
@@ -527,11 +587,23 @@ export default function App() {
                             <span className="detail-val" style={{ fontFamily: 'var(--font-mono)' }}>{(f.confidence * 100).toFixed(1)}%</span>
                             <span className="detail-label">Img Encoder:</span>
                             <span className="detail-val">{f.imageEncoderTriggered ? 'TRIGGERED' : 'SKIPPED (gated out)'}</span>
-                            {f.artifactScores && Object.entries(f.artifactScores).map(([k, v]) => (
+                            {f.predictedPathology && (
                               <>
-                                <span key={`l-${k}`} className="detail-label" style={{ textTransform: 'uppercase' }}>{k.replace(/_/g, ' ')}:</span>
-                                <span key={`v-${k}`} className="detail-val" style={{ fontFamily: 'var(--font-mono)' }}>{(v as number).toFixed(3)}</span>
+                                <span className="detail-label">Pathology:</span>
+                                <span className="detail-val" style={{ fontWeight: 'bold', color: f.predictedPathology === 'Normal' ? 'var(--color-accent-green)' : 'var(--color-accent-red)' }}>
+                                  {f.predictedPathology.replace(/_/g, ' ')}
+                                </span>
+                                <span className="detail-label">Pathology Conf:</span>
+                                <span className="detail-val" style={{ fontFamily: 'var(--font-mono)' }}>
+                                  {((f.pathologyConfidence ?? 0) * 100).toFixed(1)}%
+                                </span>
                               </>
+                            )}
+                            {f.artifactScores && Object.entries(f.artifactScores).map(([k, v]) => (
+                              <div key={k} style={{ display: 'contents' }}>
+                                <span className="detail-label" style={{ textTransform: 'uppercase' }}>{k.replace(/_/g, ' ')}:</span>
+                                <span className="detail-val" style={{ fontFamily: 'var(--font-mono)' }}>{(v as number).toFixed(3)}</span>
+                              </div>
                             ))}
                           </div>
                         </div>
@@ -657,6 +729,18 @@ export default function App() {
                               <span className="detail-val" style={{ fontFamily: 'var(--font-mono)' }}>{(f.confidence * 100).toFixed(1)}%</span>
                               <span className="detail-label">Img Encoder:</span>
                               <span className="detail-val">{f.imageEncoderTriggered ? 'TRIGGERED' : 'SKIPPED'}</span>
+                              {f.predictedPathology && (
+                                <>
+                                  <span className="detail-label">Pathology:</span>
+                                  <span className="detail-val" style={{ fontWeight: 'bold', color: f.predictedPathology === 'Normal' ? 'var(--color-accent-green)' : 'var(--color-accent-red)' }}>
+                                    {f.predictedPathology.replace(/_/g, ' ')}
+                                  </span>
+                                  <span className="detail-label">Pathology Conf:</span>
+                                  <span className="detail-val" style={{ fontFamily: 'var(--font-mono)' }}>
+                                    {((f.pathologyConfidence ?? 0) * 100).toFixed(1)}%
+                                  </span>
+                                </>
+                              )}
                               {f.reconstructedKey && (
                                 <>
                                   <span className="detail-label">Recon Key:</span>
@@ -894,7 +978,7 @@ export default function App() {
                             display: 'flex', alignItems: 'center', gap: '12px',
                           }}>
                             <span style={{ fontSize: '24px' }}>{f.anomalyDetected ? '⚠' : '✓'}</span>
-                            <div>
+                            <div style={{ flex: 1 }}>
                               <div style={{ fontWeight: 700, fontSize: '13px', color: f.anomalyDetected ? 'var(--color-accent-red)' : 'var(--color-accent-green)' }}>
                                 {f.anomalyDetected ? 'K-SPACE ANOMALY DETECTED' : 'NO ANOMALY DETECTED'}
                               </div>
@@ -902,7 +986,53 @@ export default function App() {
                                 Confidence: {(f.confidence * 100).toFixed(1)}% — Image Encoder: {f.imageEncoderTriggered ? 'TRIGGERED' : 'SKIPPED (gated out)'}
                               </div>
                             </div>
+                            {f.predictedPathology && (
+                              <div style={{ textAlign: 'right', borderLeft: '1px solid var(--color-panel-border)', paddingLeft: '15px' }}>
+                                <div style={{ fontSize: '10px', textTransform: 'uppercase', color: 'var(--color-text-dim)' }}>AI Diagnosis</div>
+                                <div style={{ fontWeight: 'bold', fontSize: '14px', color: f.predictedPathology === 'Normal' ? 'var(--color-accent-green)' : 'var(--color-accent-red)' }}>
+                                  {f.predictedPathology.replace(/_/g, ' ')}
+                                </div>
+                                <div style={{ fontSize: '11px', fontFamily: 'var(--font-mono)' }}>
+                                  {((f.pathologyConfidence ?? 0) * 100).toFixed(1)}% confidence
+                                </div>
+                              </div>
+                            )}
                           </div>
+
+                          {/* Pathology Probabilities List */}
+                          {f.pathologyProbabilities && (
+                            <div style={{ border: '1px solid var(--color-panel-border)', padding: '12px', background: '#f5f7f8' }}>
+                              <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text-dim)', textTransform: 'uppercase', marginBottom: '8px' }}>
+                                Pathology Risk Profiling (Fused S4-CNN)
+                              </div>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                {Object.entries(f.pathologyProbabilities)
+                                  .sort((a, b) => (b[1] as number) - (a[1] as number))
+                                  .map(([k, v]) => {
+                                    const prob = v as number;
+                                    if (prob < 0.01) return null; // Hide very low probabilities
+                                    return (
+                                      <div key={k} style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                        <span style={{ fontSize: '10px', fontFamily: 'var(--font-mono)', width: '130px', textTransform: 'uppercase', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                          {k.replace(/_/g, ' ')}
+                                        </span>
+                                        <div className="bevel-inset" style={{ flex: 1, height: '12px', background: '#d0d8de', overflow: 'hidden', borderRadius: '2px' }}>
+                                          <div style={{
+                                            height: '100%',
+                                            width: `${prob * 100}%`,
+                                            background: k === 'Normal' ? 'var(--color-accent-green)' : prob > 0.5 ? 'var(--color-accent-red)' : 'var(--color-accent-blue)',
+                                            transition: 'width 0.5s ease',
+                                          }} />
+                                        </div>
+                                        <span style={{ fontSize: '10px', fontFamily: 'var(--font-mono)', width: '45px', textAlign: 'right' }}>
+                                          {(prob * 100).toFixed(1)}%
+                                        </span>
+                                      </div>
+                                    );
+                                  })}
+                              </div>
+                            </div>
+                          )}
 
                           {/* Artifact scores with bars */}
                           {f.artifactScores && (
