@@ -53,6 +53,11 @@ class VolumeCNNClassifier(nn.Module):
         # combined shape: [B, S, H, W]
         combined = torch.sqrt(torch.sum(torch.abs(coil_images)**2, dim=2))
         
+        # Normalize reconstructed magnitude volume per patient to mean 0, std 1
+        mean = torch.mean(combined, dim=[1, 2, 3], keepdim=True)
+        std = torch.std(combined, dim=[1, 2, 3], keepdim=True)
+        combined = (combined - mean) / (std + 1e-8)
+        
         # 3. Add channel dimension: [B, 1, S, H, W]
         return combined.unsqueeze(1)
         
@@ -73,8 +78,12 @@ class VolumeCNNClassifier(nn.Module):
             x_spat_pool = nn.functional.avg_pool3d(x_feat, kernel_size=(1, x_feat.shape[-2], x_feat.shape[-1]))
             # Squeeze spatial dimensions: [B, 128, S_down]
             x_spat_pool = x_spat_pool.squeeze(-1).squeeze(-1)
-            # Interpolate sequence length to S (64)
-            x_seq = nn.functional.interpolate(x_spat_pool, size=S, mode='linear', align_corners=False)
+            # Interpolate sequence length to S
+            # Safely handle sequence length of 1 to avoid linear interpolation error
+            if x_spat_pool.shape[-1] == 1:
+                x_seq = x_spat_pool.repeat(1, 1, S)
+            else:
+                x_seq = nn.functional.interpolate(x_spat_pool, size=S, mode='linear', align_corners=False)
             # Transpose to [B, S, 128]
             return x_seq.transpose(1, 2)
             

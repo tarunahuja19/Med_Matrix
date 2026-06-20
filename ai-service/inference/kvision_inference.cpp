@@ -131,9 +131,9 @@ struct InferenceEngine::Impl {
             throw std::invalid_argument(oss.str());
         }
 
-        // Build input tensor (shape: [1, 64, 1, 128, 128, 2])
+        // Build input tensor (shape: [1, 8, 16, 128, 128, 2])
         std::vector<int64_t> shape = {
-            KSpaceDims::batch, KSpaceDims::slices, KSpaceDims::channels,
+            KSpaceDims::batch, KSpaceDims::slices, KSpaceDims::coils,
             KSpaceDims::height, KSpaceDims::width, KSpaceDims::ri
         };
 
@@ -223,7 +223,7 @@ std::string InferenceEngine::get_model_description() const {
     std::ostringstream oss;
     oss << "KVision Fused S4-CNN MRI Classifier\n"
         << "  Model: " << pimpl_->config.model_path << "\n"
-        << "  Input: " << pimpl_->input_name << " [1, 64, 1, 128, 128, 2] float32\n"
+        << "  Input: " << pimpl_->input_name << " [1, 8, 16, 128, 128, 2] float32\n"
         << "  Output: " << pimpl_->output_name << " [1, 11] float32\n"
         << "  Backend: " << (pimpl_->config.use_cuda ? "CUDA" : "CPU") << "\n"
         << "  Classes: 11 pathology types";

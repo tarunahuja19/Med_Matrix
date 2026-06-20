@@ -2,8 +2,8 @@ import numpy as np
 
 def correct_line_phases(kspace: np.ndarray) -> np.ndarray:
     """
-    Applies line-by-line phase correction in K-space (zero-order phase correction).
-    Aligns the phase of each acquisition line at the echo center (peak magnitude).
+    Applies global phase correction in K-space (zero-order phase correction).
+    Aligns the phase of the entire volume to the central echo peak.
     
     Parameters:
         kspace (np.ndarray): Complex K-space array of shape [slices, coils, height, width].
@@ -16,16 +16,14 @@ def correct_line_phases(kspace: np.ndarray) -> np.ndarray:
     
     for s in range(slices):
         for c in range(coils):
-            slice_coil_kspace = corrected_kspace[s, c, :, :]
-            for y in range(height):
-                line = slice_coil_kspace[y, :]
-                # Locate the echo center (peak magnitude)
-                peak_idx = np.argmax(np.abs(line))
-                # Compute phase at the peak
-                peak_phase = np.angle(line[peak_idx])
-                # Subtract the phase from the entire line
-                corrected_kspace[s, c, y, :] = line * np.exp(-1j * peak_phase)
-                
+            # Locate the global peak of the 2D k-space (typically at the center)
+            peak_idx_flat = np.argmax(np.abs(corrected_kspace[s, c, :, :]))
+            y_peak, x_peak = np.unravel_index(peak_idx_flat, (height, width))
+            # Get phase at the global peak
+            peak_phase = np.angle(corrected_kspace[s, c, y_peak, x_peak])
+            # Subtract this single phase from the entire 2D k-space
+            corrected_kspace[s, c, :, :] *= np.exp(-1j * peak_phase)
+            
     return corrected_kspace
 
 def align_coil_phases(coil_images: np.ndarray, kspace: np.ndarray) -> np.ndarray:

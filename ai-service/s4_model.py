@@ -140,15 +140,65 @@ class ComplexSSMBlock(nn.Module):
         x_out = self.proj_out(x_ssm)
         return residual + x_out
 
+class KSpaceS4Encoder(nn.Module):
+    """
+    Parameter-efficient 2D Convolutional Encoder for Complex K-space Slices.
+    Maps [B, S, C, H, W] complex tensor to [B, S, d_model] complex representation.
+    """
+    def __init__(self, coils: int, d_model: int):
+        super().__init__()
+        # Input has 2 * coils channels (real and imag parts stacked)
+        self.conv1 = nn.Conv2d(2 * coils, 32, kernel_size=3, stride=2, padding=1)
+        self.bn1 = nn.BatchNorm2d(32)
+        self.relu1 = nn.ReLU(inplace=True)
+        
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1)
+        self.bn2 = nn.BatchNorm2d(64)
+        self.relu2 = nn.ReLU(inplace=True)
+        
+        self.conv3 = nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1)
+        self.bn3 = nn.BatchNorm2d(128)
+        self.relu3 = nn.ReLU(inplace=True)
+        
+        self.conv4 = nn.Conv2d(128, 128, kernel_size=3, stride=2, padding=1)
+        self.bn4 = nn.BatchNorm2d(128)
+        self.relu4 = nn.ReLU(inplace=True)
+        
+        self.pool = nn.AdaptiveAvgPool2d((1, 1))
+        # Project real representation back to complex
+        self.proj_real = nn.Linear(128, d_model)
+        self.proj_imag = nn.Linear(128, d_model)
+        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x shape: [B, S, C, H, W] (complex64)
+        B, S, C, H, W = x.shape
+        # Stack real and imaginary parts along the channel dimension
+        # Reshape to [B * S, C, H, W]
+        x_real = x.real.reshape(B * S, C, H, W)
+        x_imag = x.imag.reshape(B * S, C, H, W)
+        x_in = torch.cat([x_real, x_imag], dim=1) # [B * S, 2 * C, H, W]
+        
+        feat = self.relu1(self.bn1(self.conv1(x_in)))
+        feat = self.relu2(self.bn2(self.conv2(feat)))
+        feat = self.relu3(self.bn3(self.conv3(feat)))
+        feat = self.relu4(self.bn4(self.conv4(feat)))
+        
+        feat_pooled = self.pool(feat).view(B * S, 128)
+        
+        out_real = self.proj_real(feat_pooled).view(B, S, -1)
+        out_imag = self.proj_imag(feat_pooled).view(B, S, -1)
+        
+        return torch.complex(out_real, out_imag)
+
 class KSpaceS4Classifier(nn.Module):
     """
     Classifier for raw patient K-space volumes.
-    Accepts [B, S, C, H, W] complex inputs, projects them, passes them
-    through sequential Complex SSM blocks, pools them, and predicts logits.
+    Accepts [B, S, C, H, W] complex inputs, projects them via a Conv2D encoder,
+    passes them through sequential Complex SSM blocks, pools them, and predicts logits.
     """
-    def __init__(self, d_model: int = 128, d_state: int = 16, n_layers: int = 2, num_classes: int = 11, input_dim: int = 16384):
+    def __init__(self, d_model: int = 128, d_state: int = 16, n_layers: int = 2, num_classes: int = 11, input_dim: int = 16384, coils: int = 16):
         super().__init__()
-        self.encoder = ComplexLinear(input_dim, d_model, bias=True)
+        self.encoder = KSpaceS4Encoder(coils=coils, d_model=d_model)
         self.blocks = nn.ModuleList([
             ComplexSSMBlock(d_model, d_state=d_state, expand=2)
             for _ in range(n_layers)
@@ -157,11 +207,9 @@ class KSpaceS4Classifier(nn.Module):
         
     def forward(self, x: torch.Tensor, return_features: bool = False, return_sequence: bool = False) -> torch.Tensor:
         # Input shape: [B, S, C, H, W] (complex64)
-        B, S, C, H, W = x.shape
-        x_flat = x.view(B, S, C * H * W) # [B, S, 16384]
         
-        # Project to latent dimension
-        x_enc = self.encoder(x_flat) # [B, S, d_model]
+        # Project to latent dimension via Conv2D encoder
+        x_enc = self.encoder(x) # [B, S, d_model] (complex64)
         
         # Sequence processing
         x_out = x_enc

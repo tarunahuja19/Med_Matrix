@@ -247,7 +247,7 @@ int main(int argc, char** argv) {
               << "╚══════════════════════════════════════════════════╝\n" CLR_RESET;
 
     // Parse args
-    std::string model_path = "../fused_model.onnx";
+    std::string model_path = "../fused_model_128.onnx";
     bool use_cuda = false;
 
     for (int i = 1; i < argc; ++i) {

@@ -1,5 +1,6 @@
+import os
 import sys
-sys.path.append('/kaggle/working/ai-service')
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import torch
 from fused_model_onnx import FusedS4CNNClassifierONNX
 
@@ -8,8 +9,9 @@ def main():
     print("ONNX EXPORT PIPELINE")
     print("=" * 60)
 
-    checkpoint_path = "/kaggle/working/fused_model.pt"
-    onnx_path = "/kaggle/working/fused_model.onnx"
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    checkpoint_path = os.path.join(base_dir, "fused_model.pt")
+    onnx_path = os.path.join(base_dir, "fused_model.onnx")
 
     # ── Step 1: Load checkpoint ──
     print("\n[1/4] Loading PyTorch checkpoint...")

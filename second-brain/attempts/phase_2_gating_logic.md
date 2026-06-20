@@ -16,7 +16,7 @@ Implement Phase 2 AI Core Cascade and Infrastructure Integration:
 ---
 
 ## 🗺️ Background / Context
-- Workspace: `/home/jemin/Projects/MRI/KVISION`
+- Workspace: `/home/jemin/Projects/Med_Matrix`
 - Frameworks: Electron (v29), Express (Node.js v20), Prisma, BullMQ, Redis, MinIO S3, FastAPI (Python v3.11), PyTorch.
 
 ---
@@ -25,10 +25,10 @@ Implement Phase 2 AI Core Cascade and Infrastructure Integration:
 
 ### Attempt 1: Schema Migration & Inter-Service API Integration
 *   **What was tried**: 
-    1. Defined request/response schemas in [ai-service/models.py](file:///home/jemin/Projects/MRI/KVISION/ai-service/models.py) and linked the logic in [ai-service/main.py](file:///home/jemin/Projects/MRI/KVISION/ai-service/main.py).
-    2. Extended [schema.prisma](file:///home/jemin/Projects/MRI/KVISION/apps/backend/prisma/schema.prisma) with the 3 new AI-related tables and ran database migrations.
-    3. Coded the `AIServiceClient` class using Axios, and hooked it into the BullMQ queue processor in [apps/backend/src/worker.ts](file:///home/jemin/Projects/MRI/KVISION/apps/backend/src/worker.ts).
-    4. Completed React layouts in [apps/electron/src/renderer/App.tsx](file:///home/jemin/Projects/MRI/KVISION/apps/electron/src/renderer/App.tsx) to render Archive study logs and report summaries.
+    1. Defined request/response schemas in [ai-service/models.py](file:///home/jemin/Projects/Med_Matrix/ai-service/models.py) and linked the logic in [ai-service/main.py](file:///home/jemin/Projects/Med_Matrix/ai-service/main.py).
+    2. Extended [schema.prisma](file:///home/jemin/Projects/Med_Matrix/apps/backend/prisma/schema.prisma) with the 3 new AI-related tables and ran database migrations.
+    3. Coded the `AIServiceClient` class using Axios, and hooked it into the BullMQ queue processor in [apps/backend/src/worker.ts](file:///home/jemin/Projects/Med_Matrix/apps/backend/src/worker.ts).
+    4. Completed React layouts in [apps/electron/src/renderer/App.tsx](file:///home/jemin/Projects/Med_Matrix/apps/electron/src/renderer/App.tsx) to render Archive study logs and report summaries.
 *   **Result**: Services compiled successfully, but runtime execution encountered minor integration issues.
 
 ---
@@ -38,17 +38,17 @@ Implement Phase 2 AI Core Cascade and Infrastructure Integration:
 ### Issue 1: PostgreSQL Host Port Conflict
 - **Symptom**: PostgreSQL container in `docker-compose` failed to start with a "port already in use" error.
 - **Root Cause**: The local system was already running a PostgreSQL instance on port `5432`.
-- **Fix**: Re-mapped PostgreSQL in [docker-compose.yml](file:///home/jemin/Projects/MRI/KVISION/docker-compose.yml) to map the host port `5433` to container port `5432`.
+- **Fix**: Re-mapped PostgreSQL in [docker-compose.yml](file:///home/jemin/Projects/Med_Matrix/docker-compose.yml) to map the host port `5433` to container port `5432`.
 
 ### Issue 2: CORS Preflight Gating Failures
 - **Symptom**: The Electron frontend failed to load database studies, throwing CORS policy violation errors in the console.
 - **Root Cause**: The Express backend was missing appropriate header declarations to allow cross-origin resource sharing from the Electron origins.
-- **Fix**: Installed and configured the `cors` package in Express backend ([apps/backend/src/index.ts](file:///home/jemin/Projects/MRI/KVISION/apps/backend/src/index.ts)).
+- **Fix**: Installed and configured the `cors` package in Express backend ([apps/backend/src/index.ts](file:///home/jemin/Projects/Med_Matrix/apps/backend/src/index.ts)).
 
 ### Issue 3: Missing curl/wget in Docker Containers
 - **Symptom**: Docker compose marked the backend and AI service containers as `unhealthy` even though the services were fully responsive.
 - **Root Cause**: The minimal node/python alpine-like container images lacked the `curl` or `wget` utilities required by the compose healthchecks.
-- **Fix**: Rewrote the healthcheck tests to use native Python `urllib.request` and Node.js `http.get` scripts in [docker-compose.yml](file:///home/jemin/Projects/MRI/KVISION/docker-compose.yml).
+- **Fix**: Rewrote the healthcheck tests to use native Python `urllib.request` and Node.js `http.get` scripts in [docker-compose.yml](file:///home/jemin/Projects/Med_Matrix/docker-compose.yml).
 
 ### Issue 4: Key Form Fields Alignment
 - **Symptom**: DICOM study uploads failed with a `400 Bad Request` regarding form data keys.

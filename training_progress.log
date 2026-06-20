@@ -1,0 +1,60 @@
+[2026-06-20 23:08:00] LOG INITIALIZED. Sync to remote machine complete.
+[2026-06-20 23:09:44] Starting synthetic data generation for 100 patients on the remote server...
+[2026-06-20 23:10:38] SUCCESS: 100 patients generated successfully.
+[2026-06-20 23:10:48] Starting model training on 2 Tesla T4 GPUs...
+[2026-06-20 23:11:15] Epoch 1/10 - Train Loss: 38.2975 - Val Loss: 56.8118 - Val Acc: 28.57%
+[2026-06-20 23:11:42] Epoch 2/10 - Train Loss: 89.2477 - Val Loss: 118.2010 - Val Acc: 7.14%
+[2026-06-20 23:12:10] Epoch 3/10 - Train Loss: 94.8705 - Val Loss: 65.8387 - Val Acc: 7.14%
+[2026-06-20 23:12:35] Epoch 4/10 - Train Loss: 47.9920 - Val Loss: 37.0129 - Val Acc: 7.14%
+[2026-06-20 23:13:00] Epoch 5/10 - Train Loss: 28.5749 - Val Loss: 21.3800 - Val Acc: 7.14%
+[2026-06-20 23:13:25] Epoch 6/10 - Train Loss: 8.9790 - Val Loss: 24.7976 - Val Acc: 10.71%
+[2026-06-20 23:13:50] Epoch 7/10 - Train Loss: 10.6036 - Val Loss: 20.9732 - Val Acc: 10.71%
+[2026-06-20 23:14:10] Epoch 8/10 - Train Loss: 5.6160 - Val Loss: 20.7605 - Val Acc: 35.71%
+[2026-06-20 23:14:20] Epoch 9/10 - Train Loss: 0.7163 - Val Loss: 20.4719 - Val Acc: 21.43%
+[2026-06-20 23:14:30] Epoch 10/10 - Train Loss: 0.6575 - Val Loss: 15.4039 - Val Acc: 42.86%
+[2026-06-20 23:14:35] SUCCESS: 10 epochs completed. Final validation accuracy: 42.86%. PyTorch checkpoint saved to /kaggle/working/fused_model.pt.
+[2026-06-20 23:14:38] SUCCESS: Training plot saved to /kaggle/working/training_results.png.
+[2026-06-20 23:14:40] ERROR: ONNX export failed during training script due to missing 'onnxscript' library. PyTorch weights are intact. Running fallback ONNX export script...
+[2026-06-20 23:15:48] SUCCESS: ONNX model successfully exported via legacy TorchScript exporter.
+[2026-06-20 23:16:00] LOG INITIALIZED. Sync to remote machine complete. Resuming training on new generated dataset...
+[2026-06-20 23:17:18] SUCCESS: 100 new patients generated successfully.
+[2026-06-20 23:17:21] Starting training resumption from checkpoint (/kaggle/working/Med_Matrix/fused_model.pt)...
+[2026-06-20 23:17:40] Epoch 1/10 - Train Loss: 39.4685 - Val Loss: 55.3074 - Val Acc: 7.14%
+[2026-06-20 23:18:10] Epoch 2/10 - Train Loss: 54.0020 - Val Loss: 28.1504 - Val Acc: 10.71%
+[2026-06-20 23:18:40] Epoch 3/10 - Train Loss: 23.6767 - Val Loss: 22.6339 - Val Acc: 25.00%
+[2026-06-20 23:19:10] Epoch 4/10 - Train Loss: 16.8230 - Val Loss: 30.6526 - Val Acc: 42.86%
+[2026-06-20 23:19:40] Epoch 5/10 - Train Loss: 12.9121 - Val Loss: 19.0901 - Val Acc: 50.00%
+[2026-06-20 23:20:10] Epoch 6/10 - Train Loss: 4.1600 - Val Loss: 13.8054 - Val Acc: 14.29%
+[2026-06-20 23:20:40] Epoch 7/10 - Train Loss: 0.7635 - Val Loss: 12.4390 - Val Acc: 17.86%
+[2026-06-20 23:21:10] Epoch 8/10 - Train Loss: 0.2104 - Val Loss: 20.1324 - Val Acc: 42.86%
+[2026-06-20 23:21:25] Epoch 9/10 - Train Loss: 0.6827 - Val Loss: 10.9336 - Val Acc: 25.00%
+[2026-06-20 23:21:36] Epoch 10/10 - Train Loss: 0.0264 - Val Loss: 10.1194 - Val Acc: 50.00%
+[2026-06-20 23:21:36] SUCCESS: Training finished successfully. PyTorch checkpoint saved, ONNX model successfully exported.
+[2026-06-21 00:06:12] LOG INITIALIZED. Sync to remote machine complete. Resuming training for 50 epochs on 300 patients (256 resolution) with dropout and weight decay...
+[2026-06-21 00:07:05] Epoch 1/50 - Train Loss: 31.7797 - Val Loss: 17.0269 - Val Acc: 25.00%
+[2026-06-21 00:07:42] Epoch 5/50 - Train Loss: 2.7734 - Val Loss: 4.3712 - Val Acc: 25.00%
+[2026-06-21 00:08:20] Epoch 10/50 - Train Loss: 0.3989 - Val Loss: 3.8666 - Val Acc: 56.25%
+[2026-06-21 00:09:00] Epoch 13/50 - Train Loss: 0.3546 - Val Loss: 3.6341 - Val Acc: 57.81%
+[2026-06-21 00:09:40] Epoch 15/50 - Train Loss: 0.1445 - Val Loss: 3.4156 - Val Acc: 56.25%
+[2026-06-21 00:10:20] Epoch 20/50 - Train Loss: 0.0369 - Val Loss: 6.9458 - Val Acc: 56.25%
+[2026-06-21 00:11:00] Epoch 25/50 - Train Loss: 0.0921 - Val Loss: 5.9467 - Val Acc: 56.25%
+[2026-06-21 00:11:40] Epoch 30/50 - Train Loss: 0.0426 - Val Loss: 5.7692 - Val Acc: 54.69%
+[2026-06-21 00:12:20] Epoch 35/50 - Train Loss: 0.0084 - Val Loss: 6.0456 - Val Acc: 56.25%
+[2026-06-21 00:13:00] Epoch 40/50 - Train Loss: 0.0021 - Val Loss: 5.4244 - Val Acc: 56.25%
+[2026-06-21 00:13:40] Epoch 45/50 - Train Loss: 0.0001 - Val Loss: 5.9233 - Val Acc: 56.25%
+[2026-06-21 00:14:20] Epoch 50/50 - Train Loss: 0.0002 - Val Loss: 5.9643 - Val Acc: 56.25%
+[2026-06-21 00:14:35] SUCCESS: 50 epochs completed. Final validation accuracy: 56.25% (peak: 57.81%). PyTorch checkpoint saved, ONNX model successfully exported.
+[2026-06-21 00:30:15] LOG INITIALIZED. Sync to remote machine complete. Starting training run for 50 epochs on 600 patients (128 resolution) using parameter-efficient Conv2D encoder (reducing parameters from 67M to 281k)...
+[2026-06-21 00:30:30] Epoch 1/50 - Train Loss: 2.2152 - Val Loss: 2.0007 - Val Acc: 18.75%
+[2026-06-21 00:31:00] Epoch 5/50 - Train Loss: 1.0007 - Val Loss: 1.3141 - Val Acc: 40.62%
+[2026-06-21 00:31:30] Epoch 10/50 - Train Loss: 0.6392 - Val Loss: 1.0584 - Val Acc: 52.34%
+[2026-06-21 00:32:00] Epoch 15/50 - Train Loss: 0.4529 - Val Loss: 0.9139 - Val Acc: 55.47%
+[2026-06-21 00:32:20] Epoch 17/50 - Train Loss: 0.3892 - Val Loss: 0.4137 - Val Acc: 87.50%
+[2026-06-21 00:32:50] Epoch 20/50 - Train Loss: 0.4340 - Val Loss: 0.6046 - Val Acc: 53.12%
+[2026-06-21 00:33:20] Epoch 25/50 - Train Loss: 0.3511 - Val Loss: 0.5526 - Val Acc: 85.94%
+[2026-06-21 00:33:50] Epoch 30/50 - Train Loss: 0.3746 - Val Loss: 3.5209 - Val Acc: 44.53%
+[2026-06-21 00:34:20] Epoch 35/50 - Train Loss: 0.3277 - Val Loss: 0.5415 - Val Acc: 85.94%
+[2026-06-21 00:34:50] Epoch 40/50 - Train Loss: 0.3131 - Val Loss: 0.5117 - Val Acc: 88.28%
+[2026-06-21 00:35:20] Epoch 45/50 - Train Loss: 0.3239 - Val Loss: 0.5083 - Val Acc: 87.50%
+[2026-06-21 00:35:50] Epoch 50/50 - Train Loss: 0.3107 - Val Loss: 0.5196 - Val Acc: 87.50%
+[2026-06-21 00:36:00] SUCCESS: 50 epochs completed. Final validation accuracy: 87.50% (peak: 88.28%). PyTorch checkpoint saved, ONNX model successfully exported.
