@@ -39,3 +39,5 @@ npm-debug.log*
 # AI Service Data & Binaries
 ai-service/data/
 *.npy
+*.bin
+rust-mri/target/

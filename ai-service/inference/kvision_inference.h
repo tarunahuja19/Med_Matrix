@@ -48,14 +48,15 @@ struct InferenceConfig {
 };
 
 /// K-space volume dimensions expected by the model
+/// Model input shape: [batch, slices, coils, height, width, ri]
 struct KSpaceDims {
     static constexpr int64_t batch    = 1;
-    static constexpr int64_t slices   = 64;
-    static constexpr int64_t channels = 1;
+    static constexpr int64_t slices   = 8;
+    static constexpr int64_t coils    = 16;   // multi-coil k-space
     static constexpr int64_t height   = 128;
     static constexpr int64_t width    = 128;
-    static constexpr int64_t ri       = 2;   // real + imaginary
-    static constexpr int64_t total_elements = batch * slices * channels * height * width * ri;
+    static constexpr int64_t ri       = 2;    // real + imaginary
+    static constexpr int64_t total_elements = batch * slices * coils * height * width * ri;
 };
 
 /**
@@ -68,7 +69,7 @@ struct KSpaceDims {
  *
  *   kvision::InferenceEngine engine(cfg);
  *
- *   // Prepare K-space data: [64, 1, 128, 128, 2] float32
+ *   // Prepare K-space data: [8, 16, 128, 128, 2] float32
  *   std::vector<float> kspace_data = load_kspace(...);
  *   auto result = engine.infer(kspace_data);
  *
@@ -89,7 +90,7 @@ public:
 
     /// Run inference on a K-space volume
     /// @param kspace_data  Flat float array of size KSpaceDims::total_elements
-    ///                     Layout: [S=64][C=1][H=128][W=128][RI=2]
+    ///                     Layout: [S=8][Coils=16][H=128][W=128][RI=2]
     ///                     where [RI=0] = real part, [RI=1] = imaginary part
     /// @return InferenceResult with predicted class and probabilities
     InferenceResult infer(const std::vector<float>& kspace_data);

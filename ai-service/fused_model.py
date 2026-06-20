@@ -12,7 +12,7 @@ class FusedS4CNNClassifier(nn.Module):
     Aligns both branches at slice-level, performs Cross-Attention (CNN as Query, S4 as Key/Value),
     pools the attended representation, and projects to classification logits.
     """
-    def __init__(self, d_model_s4: int = 128, d_state_s4: int = 16, n_layers_s4: int = 2, d_model_cnn: int = 128, num_classes: int = 11, input_dim_s4: int = 16384, d_attn: int = 128):
+    def __init__(self, d_model_s4: int = 128, d_state_s4: int = 16, n_layers_s4: int = 2, d_model_cnn: int = 128, num_classes: int = 11, input_dim_s4: int = 16384, d_attn: int = 128, coils: int = 16):
         super().__init__()
         
         # 1. Frequency branch
@@ -21,7 +21,8 @@ class FusedS4CNNClassifier(nn.Module):
             d_state=d_state_s4,
             n_layers=n_layers_s4,
             num_classes=num_classes,
-            input_dim=input_dim_s4
+            input_dim=input_dim_s4,
+            coils=coils
         )
         
         # 2. Spatial branch
@@ -38,6 +39,7 @@ class FusedS4CNNClassifier(nn.Module):
         self.res_proj = nn.Linear(d_model_cnn, d_attn)
         
         # 4. Joint classification head
+        self.dropout = nn.Dropout(0.3)
         self.head = nn.Linear(d_attn, num_classes)
         
         self.d_attn = d_attn
@@ -77,7 +79,7 @@ class FusedS4CNNClassifier(nn.Module):
         f_pool = torch.mean(z_fused, dim=1) # [B, d_attn]
         
         # 6. Classification logits
-        logits = self.head(f_pool) # [B, num_classes]
+        logits = self.head(self.dropout(f_pool)) # [B, num_classes]
         
         if return_attention:
             return logits, attn_weights

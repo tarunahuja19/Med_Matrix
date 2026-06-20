@@ -17,7 +17,7 @@ Implement the core input pipeline and reconstruction tasks for Jemin:
 ---
 
 ## 🗺️ Background / Context
-- Workspace: `/home/jemin/Projects/MRI/KVISION/ai-service`
+- Workspace: `/home/jemin/Projects/Med_Matrix/ai-service`
 - Monorepo using `pnpm` workspaces for Electron frontend and Node backend.
 
 ---

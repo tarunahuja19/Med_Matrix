@@ -132,10 +132,53 @@ class RealValuedSSMBlock(nn.Module):
         out_r, out_i = self.proj_out(ssm_r, ssm_i)
         return res_r + out_r, res_i + out_i
 
-class RealValuedKSpaceS4Classifier(nn.Module):
-    def __init__(self, d_model: int = 128, d_state: int = 16, n_layers: int = 2, num_classes: int = 11, input_dim: int = 16384):
+class RealValuedKSpaceS4Encoder(nn.Module):
+    def __init__(self, coils: int, d_model: int):
         super().__init__()
-        self.encoder = RealValuedComplexLinear(input_dim, d_model, bias=True)
+        self.conv1 = nn.Conv2d(2 * coils, 32, kernel_size=3, stride=2, padding=1)
+        self.bn1 = nn.BatchNorm2d(32)
+        self.relu1 = nn.ReLU(inplace=True)
+        
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1)
+        self.bn2 = nn.BatchNorm2d(64)
+        self.relu2 = nn.ReLU(inplace=True)
+        
+        self.conv3 = nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1)
+        self.bn3 = nn.BatchNorm2d(128)
+        self.relu3 = nn.ReLU(inplace=True)
+        
+        self.conv4 = nn.Conv2d(128, 128, kernel_size=3, stride=2, padding=1)
+        self.bn4 = nn.BatchNorm2d(128)
+        self.relu4 = nn.ReLU(inplace=True)
+        
+        self.pool = nn.AdaptiveAvgPool2d((1, 1))
+        self.proj_real = nn.Linear(128, d_model)
+        self.proj_imag = nn.Linear(128, d_model)
+        
+    def forward(self, xr: torch.Tensor, xi: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        # xr, xi shape: [B, S, C, H, W]
+        B, S, C, H, W = xr.shape
+        xr_flat = xr.reshape(B * S, C, H, W)
+        xi_flat = xi.reshape(B * S, C, H, W)
+        
+        x_in = torch.cat([xr_flat, xi_flat], dim=1) # [B*S, 2*C, H, W]
+        
+        feat = self.relu1(self.bn1(self.conv1(x_in)))
+        feat = self.relu2(self.bn2(self.conv2(feat)))
+        feat = self.relu3(self.bn3(self.conv3(feat)))
+        feat = self.relu4(self.bn4(self.conv4(feat)))
+        
+        feat_pooled = self.pool(feat).view(B * S, 128)
+        
+        out_real = self.proj_real(feat_pooled).view(B, S, -1)
+        out_imag = self.proj_imag(feat_pooled).view(B, S, -1)
+        
+        return out_real, out_imag
+
+class RealValuedKSpaceS4Classifier(nn.Module):
+    def __init__(self, d_model: int = 128, d_state: int = 16, n_layers: int = 2, num_classes: int = 11, input_dim: int = 16384, coils: int = 16):
+        super().__init__()
+        self.encoder = RealValuedKSpaceS4Encoder(coils=coils, d_model=d_model)
         self.blocks = nn.ModuleList([
             RealValuedSSMBlock(d_model, d_state=d_state, expand=2)
             for _ in range(n_layers)
@@ -143,11 +186,7 @@ class RealValuedKSpaceS4Classifier(nn.Module):
         self.head = nn.Linear(d_model, num_classes)
         
     def forward(self, xr: torch.Tensor, xi: torch.Tensor, return_sequence: bool = False) -> torch.Tensor:
-        B, S, C, H, W = xr.shape
-        xr_flat = xr.reshape(B, S, C * H * W)
-        xi_flat = xi.reshape(B, S, C * H * W)
-        
-        u_real, u_imag = self.encoder(xr_flat, xi_flat)
+        u_real, u_imag = self.encoder(xr, xi)
         for block in self.blocks:
             u_real, u_imag = block(u_real, u_imag)
             
@@ -221,6 +260,12 @@ class RealValuedVolumeCNNClassifier(nn.Module):
         coil_i = torch.roll(img_i, shifts=(shift_val, shift_val), dims=(-2, -1))
         
         combined = torch.sqrt(torch.sum(coil_r**2 + coil_i**2, dim=2))
+        
+        # Normalize reconstructed magnitude volume per patient to mean 0, std 1
+        mean = torch.mean(combined, dim=[1, 2, 3], keepdim=True)
+        std = torch.std(combined, dim=[1, 2, 3], keepdim=True)
+        combined = (combined - mean) / (std + 1e-8)
+        
         return combined.unsqueeze(1)
         
     def forward(self, kr: torch.Tensor, ki: torch.Tensor, return_sequence: bool = False) -> torch.Tensor:
@@ -236,7 +281,11 @@ class RealValuedVolumeCNNClassifier(nn.Module):
             # Global spatial average: [B, C, S_down, H', W'] → [B, C, S_down]
             x_spat_pool = torch.mean(x_feat, dim=[3, 4])
             # Interpolate sequence length back to S (original temporal length)
-            x_seq = nn.functional.interpolate(x_spat_pool, size=S, mode='linear', align_corners=False)
+            # Safely handle sequence length of 1 to avoid linear interpolation error
+            if x_spat_pool.shape[-1] == 1:
+                x_seq = x_spat_pool.repeat(1, 1, S)
+            else:
+                x_seq = nn.functional.interpolate(x_spat_pool, size=S, mode='linear', align_corners=False)
             # Transpose to [B, S, C]
             return x_seq.transpose(1, 2)
             
@@ -245,14 +294,15 @@ class RealValuedVolumeCNNClassifier(nn.Module):
         return self.head(x_pool)
 
 class FusedS4CNNClassifierONNX(nn.Module):
-    def __init__(self, d_model_s4: int = 128, d_state_s4: int = 16, n_layers_s4: int = 2, d_model_cnn: int = 128, num_classes: int = 11, input_dim_s4: int = 16384, d_attn: int = 128, resolution: int = 128):
+    def __init__(self, d_model_s4: int = 128, d_state_s4: int = 16, n_layers_s4: int = 2, d_model_cnn: int = 128, num_classes: int = 11, input_dim_s4: int = 16384, d_attn: int = 128, resolution: int = 128, coils: int = 16):
         super().__init__()
         self.s4_branch = RealValuedKSpaceS4Classifier(
             d_model=d_model_s4,
             d_state=d_state_s4,
             n_layers=n_layers_s4,
             num_classes=num_classes,
-            input_dim=input_dim_s4
+            input_dim=input_dim_s4,
+            coils=coils
         )
         self.cnn_branch = RealValuedVolumeCNNClassifier(
             num_classes=num_classes,
@@ -264,12 +314,19 @@ class FusedS4CNNClassifierONNX(nn.Module):
         self.v_proj = nn.Linear(d_model_s4, d_attn)
         self.res_proj = nn.Linear(d_model_cnn, d_attn)
         
+        self.dropout = nn.Dropout(0.3)
         self.head = nn.Linear(d_attn, num_classes)
         self.d_attn = d_attn
         
     def forward(self, x_real_imag: torch.Tensor) -> torch.Tensor:
         xr = x_real_imag[..., 0]
         xi = x_real_imag[..., 1]
+        
+        # Normalize complex k-space signal to unit standard deviation based on magnitude
+        mag = torch.sqrt(xr**2 + xi**2 + 1e-8)
+        std = torch.std(mag, dim=[1, 2, 3, 4], keepdim=True)
+        xr = xr / (std + 1e-8)
+        xi = xi / (std + 1e-8)
         
         z_s4 = self.s4_branch(xr, xi, return_sequence=True)
         z_cnn = self.cnn_branch(xr, xi, return_sequence=True)
@@ -284,4 +341,4 @@ class FusedS4CNNClassifierONNX(nn.Module):
         
         z_fused = z_attn + self.res_proj(z_cnn)
         f_pool = torch.mean(z_fused, dim=1)
-        return self.head(f_pool)
+        return self.head(self.dropout(f_pool))

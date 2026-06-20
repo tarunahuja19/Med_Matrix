@@ -33,6 +33,12 @@ endif()
 message(STATUS "ONNX Runtime include: ${ONNXRUNTIME_INCLUDE_DIRS}")
 message(STATUS "ONNX Runtime libraries: ${ONNXRUNTIME_LIBRARIES}")
 
+# ── Find protobuf + abseil (transitive deps of ONNX Runtime on Arch) ──
+# protobuf's pkg-config pulls in all abseil modules it depends on via --static
+if(PkgConfig_FOUND)
+    pkg_check_modules(PROTOBUF QUIET protobuf)
+endif()
+
 # ── Inference library ──
 add_library(kvision_infer STATIC
     kvision_inference.cpp
@@ -43,6 +49,7 @@ target_include_directories(kvision_infer PUBLIC
 )
 target_link_libraries(kvision_infer PUBLIC
     ${ONNXRUNTIME_LIBRARIES}
+    ${PROTOBUF_STATIC_LIBRARIES}
 )
 
 # ── Test binary ──

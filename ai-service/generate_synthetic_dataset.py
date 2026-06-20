@@ -34,151 +34,155 @@ def get_ellipse_mask(x, y, cx, cy, rx, ry, angle_deg):
 
 def generate_quantitative_maps(size: int, slice_idx: int, num_slices: int, category_id: int, difficulty: float):
     """
-    Generates quantitative T1, T2, and PD maps at 3.0T for a given slice and disease.
-    difficulty is a float in [0, 1] scaling the size and contrast of the anomaly.
+    Generates quantitative T1, T2, and PD maps at 3.0T by loading and interpolating
+    the realistic numerical brain phantom from numerical_brain_cropped.mat.
     """
+    import scipy.io
+    import scipy.ndimage
+
+    mat_path = os.path.join(os.path.dirname(__file__), "numerical_brain_cropped.mat")
+    if not os.path.exists(mat_path):
+        mat_path = "numerical_brain_cropped.mat"
+        
+    mat = scipy.io.loadmat(mat_path)
+    raw_brain = mat['cropped_brain'] # shape (141, 161, 5)
+    
+    # Extract 2D channel maps
+    pd_raw = raw_brain[..., 0]
+    t1_raw = raw_brain[..., 1]
+    t2_raw = raw_brain[..., 2]
+    b0_raw = raw_brain[..., 3]
+    
+    # Rescale each 2D channel to (size, size) using linear interpolation
+    zoom_y = size / pd_raw.shape[0]
+    zoom_x = size / pd_raw.shape[1]
+    
+    pd = scipy.ndimage.zoom(pd_raw, (zoom_y, zoom_x), order=1)
+    t1 = scipy.ndimage.zoom(t1_raw, (zoom_y, zoom_x), order=1) * 1000.0  # to ms
+    t2 = scipy.ndimage.zoom(t2_raw, (zoom_y, zoom_x), order=1) * 1000.0  # to ms
+    b0 = scipy.ndimage.zoom(b0_raw, (zoom_y, zoom_x), order=1)
+    
+    # Initialize t2dash map (default 30ms for brain tissue, 1e8 for CSF/background)
+    t2dash = np.where((t2 > 1500.0) | (pd < 0.1), 1e8, 30.0)
+    
+    # Brain tissue mask (where PD > 0.1)
+    brain_mask = pd > 0.1
+
     y, x = np.ogrid[-1:1:complex(0, size), -1:1:complex(0, size)]
     
-    # Scale phantom according to slice index (3D progression simulation)
-    z_frac = slice_idx / max(1, num_slices - 1) if num_slices > 1 else 0.5
-    scale = np.sin(np.pi * (0.15 + 0.7 * z_frac))
-    
-    # Initialize background
-    t1 = np.ones((size, size), dtype=np.float32) * T1_BG
-    t2 = np.ones((size, size), dtype=np.float32) * T2_BG
-    pd = np.zeros((size, size), dtype=np.float32)
-    
-    # Anatomical variation for healthy / base phantoms
-    rng_anom = np.random.default_rng(seed=int(difficulty * 100000) + slice_idx + category_id * 7)
-    
-    # Base scale & rotation
-    b_scale = scale * rng_anom.uniform(0.97, 1.03) if category_id == 0 else scale
-    b_rot = rng_anom.uniform(-4.0, 4.0) if category_id == 0 else 0.0
-    
-    # Ventricles radii
-    v_rx = 0.12 * b_scale * (1.2 - 0.5 * abs(z_frac - 0.5))
-    v_ry = 0.25 * b_scale
-    
     # Hydrocephalus (category 4): enlarged ventricles
-    if category_id == 4:
-        dilation = 2.5 - 1.25 * difficulty
-        v_rx *= dilation
-        v_ry *= dilation
+    if category_id == 4 or category_id == 5:
+        # Ventricles are roughly centered at x in [-0.25, 0.25] and y in [-0.2, 0.35]
+        y_grid, x_grid = np.meshgrid(np.linspace(-1, 1, size), np.linspace(-1, 1, size), indexing='ij')
+        ventricle_coord_mask = (x_grid > -0.25) & (x_grid < 0.25) & (y_grid > -0.2) & (y_grid < 0.35)
+        ventricle_mask = ventricle_coord_mask & (t2 > 1000.0) & brain_mask
         
-    # Brain Atrophy (category 5): widened ventricles & shrunk brain tissue
-    brain_scale = 1.0
-    midline_shift = 0.0
-    if category_id == 5:
-        brain_scale = 0.82 + 0.12 * difficulty
-        dilation = 1.6 - 0.45 * difficulty
-        v_rx *= dilation
-        v_ry *= dilation
-    elif category_id == 6:
-        # Midline shift due to Subdural Hematoma
-        midline_shift = (0.075 - 0.055 * difficulty) * b_scale
-
-    # Base brain masks
-    skull_outer_mask = get_ellipse_mask(x, y, 0.0, -0.05, 0.75 * b_scale, 0.85 * b_scale, b_rot)
-    skull_inner_mask = get_ellipse_mask(x, y, 0.0, -0.05, 0.71 * b_scale, 0.81 * b_scale, b_rot)
-    
-    brain_tissue_mask = get_ellipse_mask(x, y, midline_shift, -0.05, 0.70 * b_scale * brain_scale, 0.80 * b_scale * brain_scale, b_rot)
-    
-    # White matter (Deep tracts)
-    wm1_mask = get_ellipse_mask(x, y, -0.25 * b_scale * brain_scale + midline_shift, -0.2 * b_scale * brain_scale, 0.18 * b_scale * brain_scale, 0.25 * b_scale * brain_scale, 15 + b_rot)
-    wm2_mask = get_ellipse_mask(x, y, 0.25 * b_scale * brain_scale + midline_shift, -0.2 * b_scale * brain_scale, 0.18 * b_scale * brain_scale, 0.25 * b_scale * brain_scale, -15 + b_rot)
-    wm3_mask = get_ellipse_mask(x, y, midline_shift, 0.35 * b_scale * brain_scale, 0.25 * b_scale * brain_scale, 0.15 * b_scale * brain_scale, b_rot)
-    
-    v1_mask = get_ellipse_mask(x, y, -0.15 * b_scale + midline_shift, 0.05 * b_scale, v_rx, v_ry, -10 + b_rot)
-    v2_mask = get_ellipse_mask(x, y, 0.15 * b_scale + midline_shift, 0.05 * b_scale, v_rx, v_ry, 10 + b_rot)
-    
-    # Fill standard tissue values
-    t1[skull_outer_mask] = T1_BONE
-    t2[skull_outer_mask] = T2_BONE
-    pd[skull_outer_mask] = PD_BONE
-    
-    t1[skull_inner_mask] = T1_CSF
-    t2[skull_inner_mask] = T2_CSF
-    pd[skull_inner_mask] = PD_CSF
-    
-    t1[brain_tissue_mask] = T1_GM
-    t2[brain_tissue_mask] = T2_GM
-    pd[brain_tissue_mask] = PD_GM
-    
-    for wm_m in [wm1_mask, wm2_mask, wm3_mask]:
-        wm_intersection = wm_m & brain_tissue_mask
-        t1[wm_intersection] = T1_WM
-        t2[wm_intersection] = T2_WM
-        pd[wm_intersection] = PD_WM
-        
-    t1[v1_mask & brain_tissue_mask] = T1_CSF
-    t2[v1_mask & brain_tissue_mask] = T2_CSF
-    pd[v1_mask & brain_tissue_mask] = PD_CSF
-    t1[v2_mask & brain_tissue_mask] = T1_CSF
-    t2[v2_mask & brain_tissue_mask] = T2_CSF
-    pd[v2_mask & brain_tissue_mask] = PD_CSF
-
+        if category_id == 4:
+            # Hydrocephalus: dilate ventricles
+            dilation_pixels = int((12 - 6 * difficulty) * (size / 256.0))
+            dilated_ventricles = scipy.ndimage.binary_dilation(ventricle_mask, iterations=max(1, dilation_pixels))
+            t1[dilated_ventricles] = T1_CSF
+            t2[dilated_ventricles] = T2_CSF
+            pd[dilated_ventricles] = PD_CSF
+            t2dash[dilated_ventricles] = 1e8
+            
+        elif category_id == 5:
+            # Brain Atrophy: dilate ventricles and erode outer brain tissue
+            dilation_pixels = int((5 - 2 * difficulty) * (size / 256.0))
+            dilated_ventricles = scipy.ndimage.binary_dilation(ventricle_mask, iterations=max(1, dilation_pixels))
+            t1[dilated_ventricles] = T1_CSF
+            t2[dilated_ventricles] = T2_CSF
+            pd[dilated_ventricles] = PD_CSF
+            t2dash[dilated_ventricles] = 1e8
+            
+            # Erode brain tissue boundary to simulate widened sulci (outer CSF space)
+            tissue_mask = (pd > 0.3) & (t2 < 500.0)
+            erosion_pixels = int((6 - 3 * difficulty) * (size / 256.0))
+            eroded_tissue = scipy.ndimage.binary_erosion(tissue_mask, iterations=max(1, erosion_pixels))
+            atrophy_mask = tissue_mask & ~eroded_tissue
+            t1[atrophy_mask] = T1_CSF
+            t2[atrophy_mask] = T2_CSF
+            pd[atrophy_mask] = PD_CSF
+            t2dash[atrophy_mask] = 1e8
+ 
     # Pathology Injection
     if category_id == 1:
         cx, cy = 0.33, -0.08
-        r_tum = (0.16 - 0.11 * difficulty) * b_scale
-        r_ede = r_tum + (0.07 - 0.05 * difficulty) * b_scale
-        tumor_mask = get_ellipse_mask(x, y, cx, cy, r_tum, r_tum * 0.9, 15) & brain_tissue_mask
-        edema_mask = get_ellipse_mask(x, y, cx, cy, r_ede, r_ede * 0.9, 15) & brain_tissue_mask
+        r_tum = (0.16 - 0.11 * difficulty)
+        r_ede = r_tum + (0.07 - 0.05 * difficulty)
+        tumor_mask = get_ellipse_mask(x, y, cx, cy, r_tum, r_tum * 0.9, 15) & brain_mask
+        edema_mask = get_ellipse_mask(x, y, cx, cy, r_ede, r_ede * 0.9, 15) & brain_mask
         
         t1[edema_mask] = 1650 - 250 * difficulty
         t2[edema_mask] = 135 - 45 * difficulty
+        t2dash[edema_mask] = 70.0
         pd[edema_mask] = 0.90
+        
         t1[tumor_mask] = 1450 - 80 * difficulty
         t2[tumor_mask] = 115 - 25 * difficulty
+        t2dash[tumor_mask] = 60.0
         pd[tumor_mask] = 0.91 - 0.04 * difficulty
         
     elif category_id == 2:
         cx, cy = -0.38, 0.02
-        r_str = (0.20 - 0.14 * difficulty) * b_scale
-        stroke_mask = get_ellipse_mask(x, y, cx, cy, r_str, r_str * 1.25, -25) & brain_tissue_mask
+        r_str = (0.20 - 0.14 * difficulty)
+        stroke_mask = get_ellipse_mask(x, y, cx, cy, r_str, r_str * 1.25, -25) & brain_mask
         
-        t1[stroke_mask] = 1600 - 180 * difficulty
-        t2[stroke_mask] = 130 - 35 * difficulty
-        pd[stroke_mask] = 0.94 - 0.08 * difficulty
+        # Edema tissue properties (ischemic stroke / cytotoxic edema)
+        t1[stroke_mask] = 1500.0  # acute ischemia (notebook: 1500ms)
+        t2[stroke_mask] = 200.0   # very prolonged (notebook: 200ms)
+        t2dash[stroke_mask] = 50.0 # T2* slightly elevated (notebook: 50ms)
+        pd[stroke_mask] = pd[stroke_mask] * 1.2  # elevated (notebook: * 1.2)
+        
+        # B0 distortion at boundaries (notebook: B0 = B0 + 10.0)
+        r_str_edge = r_str + 0.04
+        edge_mask = get_ellipse_mask(x, y, cx, cy, r_str_edge, r_str_edge * 1.25, -25) & brain_mask & ~stroke_mask
+        b0[edge_mask] = b0[edge_mask] + 10.0
         
     elif category_id == 3:
         rng = np.random.default_rng(seed=int(difficulty * 450) + slice_idx)
         num_plaques = max(1, int(8 - 6 * difficulty))
         for _ in range(num_plaques):
-            px = rng.uniform(0.13, 0.27) * rng.choice([-1.0, 1.0]) * b_scale
-            py = rng.uniform(-0.12, 0.18) * b_scale
-            p_rad = (0.032 - 0.021 * difficulty) * b_scale
-            plaque_mask = get_ellipse_mask(x, y, px, py, p_rad, p_rad * rng.uniform(0.85, 1.15), rng.uniform(-30, 30)) & brain_tissue_mask
-            t1[plaque_mask] = 1420 - 180 * difficulty
-            t2[plaque_mask] = 112 - 32 * difficulty
-            pd[plaque_mask] = 0.84 - 0.04 * difficulty
+            px = rng.uniform(0.13, 0.27) * rng.choice([-1.0, 1.0])
+            py = rng.uniform(-0.12, 0.18)
+            p_rad = (0.032 - 0.021 * difficulty)
+            plaque_mask = get_ellipse_mask(x, y, px, py, p_rad, p_rad * rng.uniform(0.85, 1.15), rng.uniform(-30, 30)) & brain_mask
+            
+            # Demyelination tissue properties (WML)
+            t1[plaque_mask] = 1200.0   # prolonged (notebook: 1200ms)
+            t2[plaque_mask] = 150.0    # very prolonged (notebook: 150ms)
+            t2dash[plaque_mask] = 80.0  # T2* prolonged (notebook: 80ms)
+            pd[plaque_mask] = pd[plaque_mask] * 1.1  # slightly elevated
             
     elif category_id == 6:
-        h_outer = get_ellipse_mask(x, y, 0.0, -0.05, 0.71 * b_scale, 0.81 * b_scale, b_rot)
-        shift_val = (0.075 - 0.055 * difficulty) * b_scale
-        h_inner = get_ellipse_mask(x, y, shift_val, -0.05, 0.71 * b_scale, 0.81 * b_scale, b_rot)
-        hematoma_mask = h_outer & (~h_inner) & skull_inner_mask
+        shift_val = (0.075 - 0.055 * difficulty)
+        h_outer = get_ellipse_mask(x, y, 0.0, -0.05, 0.71, 0.81, 0.0)
+        h_inner = get_ellipse_mask(x, y, shift_val, -0.05, 0.71, 0.81, 0.0)
+        hematoma_mask = h_outer & (~h_inner)
         
         t1[hematoma_mask] = 880 + 220 * difficulty
         t2[hematoma_mask] = 58 + 22 * difficulty
+        t2dash[hematoma_mask] = 15.0  # blood breakdown products (low T2*)
         pd[hematoma_mask] = 0.81 - 0.04 * difficulty
         
     elif category_id == 7:
         cx, cy = -0.3, -0.25
-        r_cy = (0.11 - 0.08 * difficulty) * b_scale
-        cyst_mask = get_ellipse_mask(x, y, cx, cy, r_cy, r_cy, 0) & brain_tissue_mask
+        r_cy = (0.11 - 0.08 * difficulty)
+        cyst_mask = get_ellipse_mask(x, y, cx, cy, r_cy, r_cy, 0) & brain_mask
         
         t1[cyst_mask] = T1_CSF
         t2[cyst_mask] = T2_CSF
         pd[cyst_mask] = PD_CSF
+        t2dash[cyst_mask] = 1e8
         
     elif category_id == 8:
         cx, cy = 0.20, 0.28
-        r_ede = (0.24 - 0.17 * difficulty) * b_scale
-        edema_mask = get_ellipse_mask(x, y, cx, cy, r_ede, r_ede * 0.78, -12) & brain_tissue_mask
+        r_ede = (0.24 - 0.17 * difficulty)
+        edema_mask = get_ellipse_mask(x, y, cx, cy, r_ede, r_ede * 0.78, -12) & brain_mask
         
         t1[edema_mask] = 1580 - 140 * difficulty
         t2[edema_mask] = 122 - 28 * difficulty
+        t2dash[edema_mask] = 60.0
         pd[edema_mask] = 0.88
         
     elif category_id == 9:
@@ -186,38 +190,74 @@ def generate_quantitative_maps(size: int, slice_idx: int, num_slices: int, categ
         cx, cy = 0.08, -0.28
         num_lobules = max(2, int(5 - 3 * difficulty))
         for _ in range(num_lobules):
-            ox = rng.uniform(-0.035, 0.035) * b_scale
-            oy = rng.uniform(-0.035, 0.035) * b_scale
-            r_lob = (0.023 - 0.014 * difficulty) * b_scale
-            lob_mask = get_ellipse_mask(x, y, cx + ox, cy + oy, r_lob, r_lob, rng.uniform(0, 180)) & brain_tissue_mask
-            t1[lob_mask] = 160.0
-            t2[lob_mask] = 5.5
-            pd[lob_mask] = 0.06
+            ox = rng.uniform(-0.035, 0.035)
+            oy = rng.uniform(-0.035, 0.035)
+            r_lob = (0.023 - 0.014 * difficulty)
+            lob_mask = get_ellipse_mask(x, y, cx + ox, cy + oy, r_lob, r_lob, rng.uniform(0, 180)) & brain_mask
+            
+            # Hemosiderin tissue properties
+            t1[lob_mask] = 200.0
+            t2[lob_mask] = 10.0
+            t2dash[lob_mask] = 2.0  # 2ms hemosiderin T2* (notebook: 2ms)
+            pd[lob_mask] = 0.05
+            
+            # B0 distortion at the boundary
+            r_lob_edge = r_lob + 0.015
+            lob_edge_mask = get_ellipse_mask(x, y, cx + ox, cy + oy, r_lob_edge, r_lob_edge, rng.uniform(0, 180)) & brain_mask & ~lob_mask
+            b0[lob_edge_mask] = b0[lob_edge_mask] + 20.0
             
     elif category_id == 10:
         rng = np.random.default_rng(seed=int(difficulty * 999) + slice_idx)
         num_bleeds = max(6, int(20 - 12 * difficulty))  # High-density microbleeds
         for _ in range(num_bleeds):
-            r_dist = rng.uniform(0.1, 0.55) * b_scale
+            r_dist = rng.uniform(0.1, 0.55)
             theta = rng.uniform(0, 2 * np.pi)
-            bx = r_dist * np.cos(theta) + midline_shift
+            bx = r_dist * np.cos(theta)
             by = r_dist * np.sin(theta) - 0.05
-            b_rad = (0.012 - 0.006 * difficulty) * b_scale
-            bleed_mask = get_ellipse_mask(x, y, bx, by, b_rad, b_rad, 0.0) & brain_tissue_mask
+            b_rad = (0.012 - 0.006 * difficulty)
+            bleed_mask = get_ellipse_mask(x, y, bx, by, b_rad, b_rad, 0.0) & brain_mask
+            
+            # Hemosiderin tissue properties (microbleed)
             t1[bleed_mask] = 200.0
-            t2[bleed_mask] = 5.0
-            pd[bleed_mask] = 0.05
+            t2[bleed_mask] = 10.0
+            t2dash[bleed_mask] = 2.0  # 2ms hemosiderin T2* (notebook: 2ms)
+            pd[bleed_mask] = pd[bleed_mask] * 0.5  # halved (notebook: * 0.5)
+            
+            # B0 distortion at the boundaries for blooming artifact (notebook: B0 = B0 + 30.0)
+            b_rad_edge = b_rad + 0.01
+            bleed_edge_mask = get_ellipse_mask(x, y, bx, by, b_rad_edge, b_rad_edge, 0.0) & brain_mask & ~bleed_mask
+            b0[bleed_edge_mask] = b0[bleed_edge_mask] + 30.0
             
     # Clip map values
     t1 = np.clip(t1, 1.0, 5000.0)
     t2 = np.clip(t2, 1.0, 3000.0)
     pd = np.clip(pd, 0.0, 1.0)
-    return t1, t2, pd
+    t2dash = np.clip(t2dash, 1.0, 1e8)
+    return t1, t2, pd, t2dash, b0
 
-def simulate_mri_signal(t1: np.ndarray, t2: np.ndarray, pd: np.ndarray, TR: float, TE: float) -> np.ndarray:
+def simulate_mri_signal(t1: np.ndarray, t2: np.ndarray, pd: np.ndarray, t2dash: np.ndarray, b0: np.ndarray, TR: float, TE: float) -> np.ndarray:
     t1_safe = np.where(t1 > 0, t1, 1e-8)
     t2_safe = np.where(t2 > 0, t2, 1e-8)
-    return pd * (1.0 - np.exp(-TR / t1_safe)) * np.exp(-TE / t2_safe)
+    
+    # Calculate t2_star: 1/t2_star = 1/t2 + 1/t2dash
+    # CSF has t2dash = infinity (represented as 1e8, so 1/t2dash = 0)
+    t2dash_inv = np.where(t2dash > 0, 1.0 / t2dash, 0.0)
+    t2_star = 1.0 / (1.0 / t2_safe + t2dash_inv)
+    
+    # Steady state GRE/FLASH signal equation
+    # S = pd * sin(alpha) * (1 - exp(-TR/T1)) / (1 - cos(alpha)*exp(-TR/T1)) * exp(-TE/T2*)
+    # flip angle alpha = 10 degrees (same as notebook: 10 * pi / 180 = 0.1745 rad)
+    alpha = np.radians(10.0)
+    cos_alpha = np.cos(alpha)
+    sin_alpha = np.sin(alpha)
+    
+    exp_tr_t1 = np.exp(-TR / t1_safe)
+    gre_magnitude = pd * sin_alpha * (1.0 - exp_tr_t1) / (1.0 - cos_alpha * exp_tr_t1) * np.exp(-TE / t2_star)
+    
+    # Phase shift from B0 off-resonance (TE is in ms, so convert to seconds: TE / 1000.0)
+    phase = 2.0 * np.pi * b0 * (TE / 1000.0)
+    
+    return gre_magnitude * np.exp(1j * phase)
 
 def generate_coil_sensitivities(height: int, width: int, num_coils: int) -> np.ndarray:
     y, x = np.ogrid[-1:1:complex(0, height), -1:1:complex(0, width)]
@@ -261,8 +301,8 @@ def generate_single_patient(args):
         curr_cat_id = category_id if (s >= pathology_start and s < pathology_end) else 0
         curr_diff = difficulty if (s >= pathology_start and s < pathology_end) else 0.0
         
-        t1, t2, pd = generate_quantitative_maps(resolution, s, slices, curr_cat_id, curr_diff)
-        img_slice = simulate_mri_signal(t1, t2, pd, TR, TE)
+        t1, t2, pd, t2dash, b0 = generate_quantitative_maps(resolution, s, slices, curr_cat_id, curr_diff)
+        img_slice = simulate_mri_signal(t1, t2, pd, t2dash, b0, TR, TE)
         
         for c in range(coils):
             coil_img = img_slice * sens_maps[c]
@@ -281,7 +321,7 @@ def generate_single_patient(args):
 
 def main():
     parser = argparse.ArgumentParser(description="Synthetic MRI Patient K-Space Volume Generator.")
-    parser.add_argument("--num_patients", type=int, default=800, help="Total number of patients to generate.")
+    parser.add_argument("--num_patients", type=int, default=2000, help="Total number of patients to generate.")
     parser.add_argument("--slices", type=int, default=8, help="Slices per patient.")
     parser.add_argument("--coils", type=int, default=16, help="Coils per patient.")
     parser.add_argument("--resolution", type=int, default=256, help="Resolution.")
