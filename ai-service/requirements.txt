@@ -8,3 +8,7 @@ pywavelets
 pytest
 httpx
 minio
+pypdf
+google-generativeai
+redis
+upstash-redis

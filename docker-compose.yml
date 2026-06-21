@@ -45,6 +45,7 @@ services:
       context: .
       dockerfile: ai-service/Dockerfile
     restart: always
+    env_file: .env
     ports:
       - "8000:8000"
     environment:
@@ -54,6 +55,7 @@ services:
       MINIO_SECURE: "false"
     volumes:
       - ./ai-service:/app           # hot-reload: live code mount
+      - ./data:/app/data            # disease reference data
     depends_on:
       minio:
         condition: service_healthy

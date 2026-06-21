@@ -15,6 +15,7 @@ out/
 __pycache__/
 *.pyc
 .venv/
+venv/
 *.egg-info/
 
 # Docker volumes (local data)
@@ -41,3 +42,10 @@ ai-service/data/
 *.npy
 *.bin
 rust-mri/target/
+
+# Temporary PDF tests and binaries
+rust-mri/test_report.pdf
+rust-mri/test_endpoint_result.pdf
+rust-mri/test_report.txt
+rust-mri/test_pdf_endpoint.py
+ai-service/report_pdf

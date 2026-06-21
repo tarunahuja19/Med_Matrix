@@ -1,15 +1,18 @@
 # Stage 1: Build Rust MRI reconstruction binary
-FROM rust:1.80-slim as rust-builder
+FROM rust:1.85-slim as rust-builder
 WORKDIR /build
 
 # Copy Cargo manifests for dependency caching
 COPY rust-mri/Cargo.toml rust-mri/Cargo.lock ./
 # Create a dummy source file to compile and cache dependencies
-RUN mkdir src && echo "fn main() {}" > src/main.rs && cargo build --release
+RUN mkdir -p src/bin && \
+    echo "fn main() {}" > src/main.rs && \
+    echo "fn main() {}" > src/bin/report_pdf.rs && \
+    cargo build --release
 
 # Copy the actual Rust source code and rebuild
 COPY rust-mri/src ./src
-RUN touch src/main.rs && cargo build --release
+RUN touch src/main.rs src/bin/report_pdf.rs && cargo build --release
 
 # Stage 2: Final Python environment
 FROM python:3.11-slim
@@ -34,7 +37,8 @@ RUN pip install --no-cache-dir --default-timeout=1000 \
 # Copy all python source files
 COPY ai-service/ .
 
-# Copy the compiled Rust binary from the builder stage
+# Copy the compiled Rust binaries from the builder stage
 COPY --from=rust-builder /build/target/release/rust-mri /usr/local/bin/rust-mri-bin
+COPY --from=rust-builder /build/target/release/report_pdf /usr/local/bin/report_pdf
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
