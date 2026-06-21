@@ -231,6 +231,45 @@ export class AIServiceClient {
       return null
     }
   }
+
+  /**
+   * Fetches the forecasted untreated progression projection for a given pathology.
+   */
+  async getProgressionProjection(
+    pathology: string,
+    initialVolume?: number
+  ): Promise<ProgressionResponse | null> {
+    try {
+      const res = await this.http.post<ProgressionResponse>('/predict/progression', {
+        pathology,
+        initial_pathology_volume_cm3: initialVolume ?? null,
+      })
+      if (res.data && res.data.status === 'success') {
+        return res.data
+      }
+      return null
+    } catch (err: any) {
+      console.error(`AI-service /predict/progression failed: ${err.message}`)
+      return null
+    }
+  }
+}
+
+export interface ProgressionPoint {
+  month: number
+  pathology_volume_cm3: number
+  edema_volume_cm3: number
+  healthy_brain_volume_cm3: number
+  cognitive_impact_pct: number
+  severity_level: string
+  clinical_note: string
+}
+
+export interface ProgressionResponse {
+  status: string
+  pathology: string
+  initial_volume_cm3: number
+  timeline: ProgressionPoint[]
 }
 
 // Singleton export so worker and routes share one instance

@@ -4,6 +4,7 @@ import { Readable } from 'stream'
 import { PrismaClient } from '@prisma/client'
 import { studyQueue } from '../queue'
 import { minioClient } from '../storage'
+import { aiClient } from '../ai-client'
 
 const router = Router()
 const prisma = new PrismaClient()
@@ -204,6 +205,51 @@ router.get('/:id/reconstructed-gradcam', async (req, res) => {
   } catch (err: any) {
     console.error(`Failed to fetch reconstructed Grad-CAM for study ${id}: ${err.message}`)
     res.status(500).json({ error: `Failed to fetch reconstructed Grad-CAM: ${err.message}` })
+  }
+})
+
+// ---------------------------------------------------------------------------
+// GET /studies/:id/progression
+// Fetches progression projection based on pathology from Fused S4-CNN
+// ---------------------------------------------------------------------------
+router.get('/:id/progression', async (req, res) => {
+  const { id } = req.params
+  const initialVolume = req.query.initialVolume ? Number(req.query.initialVolume) : undefined
+
+  try {
+    // Find the latest completed model result for this study
+    const modelResult = await prisma.modelResult.findFirst({
+      where: {
+        studyId: id,
+        modelName: 'fused-s4-cnn',
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    })
+
+    let pathology = 'Normal'
+    if (modelResult) {
+      try {
+        const scores = JSON.parse(modelResult.rawScores)
+        if (scores && scores.predictedPathology) {
+          pathology = scores.predictedPathology
+        }
+      } catch (e) {
+        // Ignore parsing error
+      }
+    }
+
+    const projection = await aiClient.getProgressionProjection(pathology, initialVolume)
+    if (!projection) {
+      res.status(502).json({ error: 'Failed to generate progression projection from AI service' })
+      return
+    }
+
+    res.json(projection)
+  } catch (err: any) {
+    console.error(`Failed to fetch progression projection for study ${id}: ${err.message}`)
+    res.status(500).json({ error: `Failed to fetch progression projection: ${err.message}` })
   }
 })
 

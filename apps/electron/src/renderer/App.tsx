@@ -54,6 +54,23 @@ interface AIFindings {
   kspaceLogMagKey?: string
 }
 
+interface ProgressionPoint {
+  month: number
+  pathology_volume_cm3: number
+  edema_volume_cm3: number
+  healthy_brain_volume_cm3: number
+  cognitive_impact_pct: number
+  severity_level: string
+  clinical_note: string
+}
+
+interface ProgressionResponse {
+  status: string
+  pathology: string
+  initial_volume_cm3: number
+  timeline: ProgressionPoint[]
+}
+
 // ── Tabs ─────────────────────────────────────────────────────────────────────
 type Tab = 'ingest' | 'archive' | 'patients' | 'reports' | 'brain3d' | 'analytics'
 
@@ -198,6 +215,110 @@ function convertNpyToNifti(parsedNpy: { shape: number[]; data: any }): ArrayBuff
   return combined.buffer
 }
 
+function blur2D(data: Float32Array | number[], width: number, height: number, radius: number): Float32Array {
+  const out = new Float32Array(data.length)
+  const temp = new Float32Array(data.length)
+  
+  // Horizontal pass
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      let sum = 0
+      let count = 0
+      for (let k = -radius; k <= radius; k++) {
+        const nx = x + k
+        if (nx >= 0 && nx < width) {
+          sum += data[y * width + nx]
+          count++
+        }
+      }
+      temp[y * width + x] = sum / count
+    }
+  }
+  
+  // Vertical pass
+  for (let x = 0; x < width; x++) {
+    for (let y = 0; y < height; y++) {
+      let sum = 0
+      let count = 0
+      for (let k = -radius; k <= radius; k++) {
+        const ny = y + k
+        if (ny >= 0 && ny < height) {
+          sum += temp[ny * width + x]
+          count++
+        }
+      }
+      out[y * width + x] = sum / count
+    }
+  }
+  
+  return out
+}
+
+function colormapHotSpot(v: number): [number, number, number] {
+  // Brighter thermal/hotspot colormap: crimson red -> vibrant orange -> golden yellow -> brilliant white
+  if (v < 0.5) {
+    const t = v / 0.5
+    return [
+      Math.floor(180 + t * 75), // Starts at 180 (bright red) instead of 130 (dark maroon)
+      Math.floor(t * 80),      // Up to 80 (orange transition)
+      Math.floor((1 - t) * 10)
+    ]
+  } else if (v < 0.8) {
+    const t = (v - 0.5) / 0.3
+    return [
+      255,
+      Math.floor(80 + t * 135), // Up to 215 (bright orange-yellow)
+      0
+    ]
+  } else {
+    const t = (v - 0.8) / 0.2
+    return [
+      255,
+      Math.floor(215 + t * 40), // Up to 255 (golden yellow to white)
+      Math.floor(t * 220)       // Up to 220 (pure bright white hotspot core)
+    ]
+  }
+}
+
+function dilateMask(slice: Float32Array, width: number, height: number, radius: number, threshold: number): Uint8Array {
+  const result = new Uint8Array(slice.length)
+  if (radius <= 0) {
+    for (let i = 0; i < slice.length; i++) {
+      if (slice[i] > threshold) result[i] = 1
+    }
+    return result
+  }
+  const rInt = Math.ceil(radius)
+  const offsets: {dx: number, dy: number}[] = []
+  for (let dy = -rInt; dy <= rInt; dy++) {
+    for (let dx = -rInt; dx <= rInt; dx++) {
+      if (dx * dx + dy * dy <= radius * radius) {
+        offsets.push({ dx, dy })
+      }
+    }
+  }
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      let found = false
+      for (let i = 0; i < offsets.length; i++) {
+        const nx = x + offsets[i].dx
+        const ny = y + offsets[i].dy
+        if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+          if (slice[ny * width + nx] > threshold) {
+            found = true
+            break
+          }
+        }
+      }
+      if (found) {
+        result[y * width + x] = 1
+      }
+    }
+  }
+  return result
+}
+
 function renderSlice(
   canvas: HTMLCanvasElement, 
   data: any, 
@@ -205,7 +326,10 @@ function renderSlice(
   sliceIndex: number,
   gradcamData: { shape: number[]; data: any } | null,
   opacity: number,
-  showOverlay: boolean
+  showOverlay: boolean,
+  showGrowth: boolean = false,
+  selectedMonth: number = 0,
+  timeline: ProgressionPoint[] | null = null
 ) {
   const ctx = canvas.getContext('2d')
   if (!ctx) return
@@ -232,11 +356,54 @@ function renderSlice(
 
   const range = max - min || 1e-8
 
-  const gradcamSlice = gradcamData && gradcamData.data
+  let gradcamSlice = gradcamData && gradcamData.data
     ? (gradcamData.data.subarray
         ? gradcamData.data.subarray(startIndex, startIndex + sliceSize)
         : gradcamData.data.slice(startIndex, startIndex + sliceSize))
     : null
+
+  if (gradcamSlice && showOverlay) {
+    gradcamSlice = blur2D(gradcamSlice, width, height, 5)
+  }
+
+  // Precompute dilated masks if growth is active
+  let basePathologyMask: Uint8Array | null = null
+  let baseEdemaMask: Uint8Array | null = null
+  let dilatedPathologyMask: Uint8Array | null = null
+  let dilatedEdemaMask: Uint8Array | null = null
+  
+  let isGrowthActive = false
+  let volRatio = 1.0
+  
+  if (gradcamSlice && showOverlay && showGrowth && timeline && selectedMonth > 0) {
+    const currentPt = timeline.find(pt => pt.month === selectedMonth)
+    const basePt = timeline.find(pt => pt.month === 0)
+    if (currentPt && basePt) {
+      const baseVol = basePt.pathology_volume_cm3
+      const currentVol = currentPt.pathology_volume_cm3
+      const baseEdema = basePt.edema_volume_cm3
+      const currentEdema = currentPt.edema_volume_cm3
+      
+      volRatio = baseVol > 0 ? currentVol / baseVol : 1.0
+      const edemaRatio = baseEdema > 0 ? currentEdema / baseEdema : 1.0
+      
+      // Show simulated progression growth in all non-Normal cases
+      // If the pathology shrinks (like Ischemia or Hemorrhage), we simulate a visual growth factor for illustration.
+      const displayVolRatio = volRatio > 1.0 ? volRatio : 1.0 + (selectedMonth / 24) * 0.5
+      const displayEdemaRatio = edemaRatio > 1.0 ? edemaRatio : 1.0 + (selectedMonth / 24) * 0.6
+      
+      isGrowthActive = true
+      // Core growth radius
+      const Dp = 8.0 * (Math.pow(displayVolRatio, 1/3) - 1.0)
+      // Edema growth radius
+      const De = 10.0 * (Math.pow(displayEdemaRatio, 1/3) - 1.0)
+      
+      basePathologyMask = dilateMask(gradcamSlice, width, height, 0, 0.40)
+      baseEdemaMask = dilateMask(gradcamSlice, width, height, 0, 0.10)
+      dilatedPathologyMask = dilateMask(gradcamSlice, width, height, Dp, 0.40)
+      dilatedEdemaMask = dilateMask(gradcamSlice, width, height, De, 0.10)
+    }
+  }
 
   const imgData = ctx.createImageData(width, height)
   for (let i = 0; i < sliceData.length; i++) {
@@ -247,35 +414,147 @@ function renderSlice(
     let b = val
 
     if (gradcamSlice && showOverlay) {
-      const camVal = gradcamSlice[i]
-      if (camVal > 0.01) {
-        const [rJet, gJet, bJet] = colormapJet(camVal)
-        const alpha = opacity * camVal
-        r = Math.floor(rJet * alpha + val * (1 - alpha))
-        g = Math.floor(gJet * alpha + val * (1 - alpha))
-        b = Math.floor(bJet * alpha + val * (1 - alpha))
+      let camVal = gradcamSlice[i]
+      
+      // If we are contracting, scale down the raw values
+      if (timeline && selectedMonth > 0 && !isGrowthActive) {
+        const currentPt = timeline.find(pt => pt.month === selectedMonth)
+        const basePt = timeline.find(pt => pt.month === 0)
+        if (currentPt && basePt) {
+          const baseVol = basePt.pathology_volume_cm3
+          const currentVol = currentPt.pathology_volume_cm3
+          if (baseVol > 0 && currentVol < baseVol) {
+            camVal = camVal * (currentVol / baseVol)
+          }
+        }
+      }
+
+      // Restrict overlay to brain structures by masking it with the grayscale intensity
+      const brainMask = Math.min(1.0, val / 15.0)
+      let rendered = false
+
+      if (isGrowthActive) {
+        // 1. Check if inside original lesion (baseEdemaMask)
+        if (baseEdemaMask && baseEdemaMask[i] === 1) {
+          if (camVal > 0.10) {
+            const normVal = (camVal - 0.10) / 0.90
+            const [rHot, gHot, bHot] = colormapHotSpot(normVal)
+            const alpha = Math.min(1.0, opacity * Math.pow(normVal, 0.8) * 1.8) * brainMask // Brighter curve and multiplier (1.8x vs 1.4x)
+            
+            r = Math.floor(rHot * alpha + val * (1 - alpha))
+            g = Math.floor(gHot * alpha + val * (1 - alpha))
+            b = Math.floor(bHot * alpha + val * (1 - alpha))
+            rendered = true
+          }
+        }
+        
+        // 2. Check if inside pathology expansion zone
+        if (!rendered && dilatedPathologyMask && dilatedPathologyMask[i] === 1 && (!basePathologyMask || basePathologyMask[i] === 0)) {
+          // Brilliant Neon Magenta for tumor core expansion (RGB: [255, 0, 190])
+          const rG = 255
+          const gG = 0
+          const bG = 190
+          const alpha = 0.85 * opacity * brainMask // Increased alpha transparency (0.85x vs 0.65x)
+          
+          r = Math.floor(rG * alpha + val * (1 - alpha))
+          g = Math.floor(gG * alpha + val * (1 - alpha))
+          b = Math.floor(bG * alpha + val * (1 - alpha))
+          rendered = true
+        }
+
+        // 3. Check if inside edema expansion zone
+        if (!rendered && dilatedEdemaMask && dilatedEdemaMask[i] === 1 && (!baseEdemaMask || baseEdemaMask[i] === 0)) {
+          // Brilliant Golden Yellow for surrounding edema expansion (RGB: [255, 215, 0])
+          const rG = 255
+          const gG = 215
+          const bG = 0
+          const alpha = 0.75 * opacity * brainMask // Increased alpha transparency (0.75x vs 0.5x)
+          
+          r = Math.floor(rG * alpha + val * (1 - alpha))
+          g = Math.floor(gG * alpha + val * (1 - alpha))
+          b = Math.floor(bG * alpha + val * (1 - alpha))
+          rendered = true
+        }
+      }
+
+      // Default rendering if growth is not active or pixel was not a growth zone
+      if (!rendered && camVal > 0.10) {
+        const normVal = (camVal - 0.10) / 0.90
+        const [rHot, gHot, bHot] = colormapHotSpot(normVal)
+        const alpha = Math.min(1.0, opacity * Math.pow(normVal, 0.8) * 1.8) * brainMask // Brighter curve and multiplier (1.8x vs 1.4x)
+        
+        r = Math.floor(rHot * alpha + val * (1 - alpha))
+        g = Math.floor(gHot * alpha + val * (1 - alpha))
+        b = Math.floor(bHot * alpha + val * (1 - alpha))
       }
     }
 
     const pixelIndex = i * 4
-    imgData.data[pixelIndex] = r // R
-    imgData.data[pixelIndex + 1] = g // G
-    imgData.data[pixelIndex + 2] = b // B
-    imgData.data[pixelIndex + 3] = 255 // A
+    imgData.data[pixelIndex] = r
+    imgData.data[pixelIndex + 1] = g
+    imgData.data[pixelIndex + 2] = b
+    imgData.data[pixelIndex + 3] = 255
   }
 
   ctx.putImageData(imgData, 0, 0)
 }
 
-function ClinicalMRIViewer({ studyId }: { studyId: string }) {
+function ClinicalMRIViewer({
+  studyId,
+  selectedMonth = 0,
+  timeline = null,
+  onMonthChange
+}: {
+  studyId: string
+  selectedMonth?: number
+  timeline?: ProgressionPoint[] | null
+  onMonthChange?: (m: number) => void
+}) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [arrayData, setArrayData] = useState<{ shape: number[]; data: any } | null>(null)
   const [gradcamData, setGradcamData] = useState<{ shape: number[]; data: any } | null>(null)
   const [sliceIndex, setSliceIndex] = useState(0)
-  const [opacity, setOpacity] = useState(0.6)
+  const [opacity, setOpacity] = useState(0.85) // Boosted default opacity to 85% for brighter overlay upon initialization
   const [showOverlay, setShowOverlay] = useState(true)
+  const [showGrowth, setShowGrowth] = useState(true)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+
+  const [localTimeline, setLocalTimeline] = useState<ProgressionPoint[] | null>(null)
+  const [localMonth, setLocalMonth] = useState<number>(0)
+
+  useEffect(() => {
+    if (timeline) {
+      setLocalTimeline(timeline)
+    }
+  }, [timeline])
+
+  useEffect(() => {
+    if (selectedMonth !== undefined) {
+      setLocalMonth(selectedMonth)
+    }
+  }, [selectedMonth])
+
+  useEffect(() => {
+    if (timeline) return // already provided by parent
+
+    let active = true
+    fetch(`${API}/studies/${studyId}/progression`)
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        return res.json()
+      })
+      .then((data) => {
+        if (active && data && data.timeline) {
+          setLocalTimeline(data.timeline)
+        }
+      })
+      .catch((err) => {
+        console.warn("Local timeline fetch failed for mri viewer:", err)
+      })
+
+    return () => { active = false }
+  }, [studyId, timeline])
 
   useEffect(() => {
     let active = true
@@ -376,9 +655,20 @@ function ClinicalMRIViewer({ studyId }: { studyId: string }) {
 
   useEffect(() => {
     if (arrayData && canvasRef.current) {
-      renderSlice(canvasRef.current, arrayData.data, arrayData.shape, sliceIndex, gradcamData, opacity, showOverlay)
+      renderSlice(
+        canvasRef.current, 
+        arrayData.data, 
+        arrayData.shape, 
+        sliceIndex, 
+        gradcamData, 
+        opacity, 
+        showOverlay,
+        showGrowth,
+        localMonth,
+        localTimeline
+      )
     }
-  }, [arrayData, sliceIndex, gradcamData, opacity, showOverlay])
+  }, [arrayData, sliceIndex, gradcamData, opacity, showOverlay, showGrowth, localMonth, localTimeline])
 
   if (loading) {
     return (
@@ -410,40 +700,103 @@ function ClinicalMRIViewer({ studyId }: { studyId: string }) {
       </div>
       
       <div style={{ display: 'flex', gap: '14px', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ border: '1px solid #1a252f', background: '#000', padding: '4px', position: 'relative' }}>
-          <canvas ref={canvasRef} style={{ width: '220px', height: '220px', imageRendering: 'pixelated' }} />
+        <div className="bevel-inset" style={{ background: '#000', padding: '6px', display: 'inline-block', borderRadius: '4px', boxShadow: 'inset 0 0 10px rgba(0,0,0,0.85)' }}>
+          <canvas ref={canvasRef} style={{ width: '220px', height: '220px', display: 'block', borderRadius: '2px' }} />
         </div>
 
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '8px', color: '#fff', fontSize: '13px' }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '8px', color: '#fff', fontSize: '13px', maxHeight: '220px', overflowY: 'auto' }}>
           <div style={{ fontWeight: 'bold', color: 'var(--color-accent-blue)', textTransform: 'uppercase', fontSize: '13px' }}>
             Spatial Domain Key:
           </div>
-          <div style={{ background: 'rgba(255,255,255,0.05)', padding: '6px', border: '1px solid rgba(255,255,255,0.1)' }}>
+          <div style={{ background: 'rgba(255,255,255,0.05)', padding: '6px', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '3px' }}>
             <div style={{ color: 'var(--color-accent-amber)', fontWeight: 'bold', fontSize: '13px' }}>Pathological Hotspots (Red):</div>
             <div style={{ fontSize: '12px', color: 'var(--color-text-dim)', marginTop: '2px' }}>
               Structural anomalies, lesions, tumor tissue or edema driving detection.
             </div>
           </div>
-          <div style={{ background: 'rgba(255,255,255,0.05)', padding: '6px', border: '1px solid rgba(255,255,255,0.1)' }}>
+          <div style={{ background: 'rgba(255,255,255,0.05)', padding: '6px', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '3px' }}>
             <div style={{ color: 'var(--color-accent-blue)', fontWeight: 'bold', fontSize: '13px' }}>Normal Anatomy (Blue/Dark):</div>
             <div style={{ fontSize: '12px', color: 'var(--color-text-dim)', marginTop: '2px' }}>
               Healthy cerebral structures and background tissue ignored by classifier.
             </div>
           </div>
+
+          {showGrowth && localMonth > 0 && localTimeline && (
+            <>
+              <div style={{ background: 'rgba(220,30,180,0.12)', padding: '6px', border: '1px solid rgba(220,30,180,0.3)', borderRadius: '3px' }}>
+                <div style={{ color: '#ff66cc', fontWeight: 'bold', fontSize: '13px' }}>Projected Pathology Growth (Magenta):</div>
+                <div style={{ fontSize: '12px', color: 'var(--color-text-dim)', marginTop: '2px' }}>
+                  Simulated untreated core expansion at {localMonth} months.
+                </div>
+              </div>
+              <div style={{ background: 'rgba(255,180,30,0.12)', padding: '6px', border: '1px solid rgba(255,180,30,0.3)', borderRadius: '3px' }}>
+                <div style={{ color: '#ffcc33', fontWeight: 'bold', fontSize: '13px' }}>Projected Edema Swelling (Amber):</div>
+                <div style={{ fontSize: '12px', color: 'var(--color-text-dim)', marginTop: '2px' }}>
+                  Simulated untreated vasogenic edema spread at {localMonth} months.
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
       <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '8px', borderTop: '1px solid #1a252f', paddingTop: '10px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px', color: '#fff' }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontFamily: 'var(--font-mono)' }}>
-            <input 
-              type="checkbox" 
-              checked={showOverlay} 
-              onChange={(e) => setShowOverlay(e.target.checked)} 
-              style={{ accentColor: 'var(--color-accent-blue)' }}
-            />
-            Show Grad-CAM Overlay
-          </label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontFamily: 'var(--font-mono)' }}>
+              <input 
+                type="checkbox" 
+                checked={showOverlay} 
+                onChange={(e) => setShowOverlay(e.target.checked)} 
+                style={{ accentColor: 'var(--color-accent-blue)' }}
+              />
+              Show Grad-CAM Overlay
+            </label>
+
+            {localTimeline && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontFamily: 'var(--font-mono)', color: 'var(--color-accent-red)', fontWeight: 'bold' }}>
+                  <input 
+                    type="checkbox" 
+                    checked={showGrowth} 
+                    onChange={(e) => setShowGrowth(e.target.checked)} 
+                    disabled={!showOverlay}
+                    style={{ accentColor: 'var(--color-accent-red)' }}
+                  />
+                  Projected Growth
+                </label>
+                {showGrowth && (
+                  <select
+                    value={localMonth}
+                    onChange={(e) => {
+                      const val = Number(e.target.value)
+                      setLocalMonth(val)
+                      if (onMonthChange) onMonthChange(val)
+                    }}
+                    disabled={!showOverlay}
+                    style={{
+                      padding: '1px 4px',
+                      fontSize: '10px',
+                      fontFamily: 'var(--font-mono)',
+                      background: '#e4e7e9',
+                      border: '1px solid var(--color-panel-border)',
+                      borderRadius: '2px',
+                      color: 'var(--color-text-main)',
+                      outline: 'none',
+                    }}
+                  >
+                    <option value={0}>0m (Baseline)</option>
+                    <option value={3}>3m</option>
+                    <option value={6}>6m</option>
+                    <option value={12}>12m</option>
+                    <option value={18}>18m</option>
+                    <option value={24}>24m</option>
+                  </select>
+                )}
+              </div>
+            )}
+          </div>
+          
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <span style={{ fontSize: '11px', color: 'var(--color-text-dim)', fontFamily: 'var(--font-mono)' }}>Opacity:</span>
             <input 
@@ -491,6 +844,336 @@ function ClinicalMRIViewer({ studyId }: { studyId: string }) {
   )
 }
 
+function ProgressionProjectionViewer({
+  studyId,
+  selectedMonth,
+  onSelectMonth,
+  lockedMonth,
+  onToggleLock,
+  onTimelineChange
+}: {
+  studyId: string
+  selectedMonth: number
+  onSelectMonth: (m: number) => void
+  lockedMonth: number | null
+  onToggleLock: (m: number) => void
+  onTimelineChange: (timeline: ProgressionPoint[] | null) => void
+}) {
+  const [initialVolume, setInitialVolume] = useState<number | ''>('')
+  const [volumeInput, setVolumeInput] = useState<string>('')
+  const [projection, setProjection] = useState<ProgressionResponse | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let active = true
+    setLoading(true)
+    setError(null)
+    
+    let url = `${API}/studies/${studyId}/progression`
+    if (initialVolume !== '' && initialVolume !== undefined) {
+      url += `?initialVolume=${initialVolume}`
+    }
+
+    fetch(url)
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP error ${res.status}`)
+        return res.json()
+      })
+      .then((data) => {
+        if (!active) return
+        setProjection(data)
+        setVolumeInput(data && data.initial_volume_cm3 !== undefined && data.initial_volume_cm3 !== null ? data.initial_volume_cm3.toString() : '0')
+        onTimelineChange(data ? data.timeline : null)
+        setLoading(false)
+      })
+      .catch((err) => {
+        if (!active) return
+        console.error("Progression fetch failed:", err)
+        setError(err.message)
+        onTimelineChange(null)
+        setLoading(false)
+      })
+
+    return () => { 
+      active = false 
+      onTimelineChange(null)
+    }
+  }, [studyId, initialVolume])
+
+  const handleRecalculate = () => {
+    const val = parseFloat(volumeInput)
+    if (!isNaN(val) && val >= 0) {
+      setInitialVolume(val)
+    }
+  }
+
+  if (loading && !projection) {
+    return (
+      <div style={{ padding: '20px', textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--color-text-dim)' }}>
+        FORECASTING UNTREATED PROGNOSIS...
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div style={{ padding: '15px', color: 'var(--color-accent-red)', fontSize: '11px', fontFamily: 'var(--font-mono)', border: '1px solid var(--color-accent-red)', background: '#fff5f5', borderRadius: '4px' }}>
+        ⚠ Progression Forecast Failed: {error}
+      </div>
+    )
+  }
+
+  if (!projection) return null
+
+  const timeline = projection.timeline || []
+  const maxVol = Math.max(...timeline.map(pt => pt.pathology_volume_cm3 + pt.edema_volume_cm3), 15)
+
+  // SVG Chart sizing
+  const viewBoxWidth = 550
+  const viewBoxHeight = 240
+  const padLeft = 45
+  const padRight = 45
+  const padTop = 25
+  const padBottom = 35
+  const plotW = viewBoxWidth - padLeft - padRight
+  const plotH = viewBoxHeight - padTop - padBottom
+
+  const getX = (month: number) => padLeft + (month / 24) * plotW
+  const getYCog = (cog: number) => padTop + plotH - (cog / 100) * plotH
+  const selectedPoint = selectedMonth > 0 ? timeline.find(pt => pt.month === selectedMonth) : null
+
+  const getYVol = (vol: number) => padTop + plotH - (vol / maxVol) * plotH
+
+  const pathVolD = timeline.map((pt, idx) => {
+    const x = getX(pt.month)
+    const y = getYVol(pt.pathology_volume_cm3)
+    return `${idx === 0 ? 'M' : 'L'} ${x} ${y}`
+  }).join(' ')
+
+  const pathEdemaD = timeline.map((pt, idx) => {
+    const x = getX(pt.month)
+    const y = getYVol(pt.edema_volume_cm3)
+    return `${idx === 0 ? 'M' : 'L'} ${x} ${y}`
+  }).join(' ')
+
+  const pathCogD = timeline.map((pt, idx) => {
+    const x = getX(pt.month)
+    const y = getYCog(pt.cognitive_impact_pct)
+    return `${idx === 0 ? 'M' : 'L'} ${x} ${y}`
+  }).join(' ')
+
+  return (
+    <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+      <div style={{ borderTop: '1px solid var(--color-panel-border)', paddingTop: '12px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+          <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text-dim)', textTransform: 'uppercase' }}>
+            Untreated Progression Projection
+          </span>
+          <span style={{ fontSize: '9px', padding: '2px 6px', color: 'var(--color-accent-red)', background: '#fff5f5', border: '1px solid var(--color-accent-red)', display: 'inline-block', borderRadius: '2px', fontFamily: 'var(--font-mono)', fontWeight: 'bold', lineHeight: 1 }}>
+            UNTREATED MODEL
+          </span>
+        </div>
+      </div>
+
+      {/* Control bar */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#e4e7e9', padding: '8px 10px', border: '1px solid var(--color-panel-border)', borderRadius: '4px' }}>
+        <span style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--color-text-dim)' }}>INITIAL VOLUME (cm³):</span>
+        <input
+          type="number"
+          step="0.5"
+          min="0"
+          value={volumeInput}
+          onChange={(e) => setVolumeInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') handleRecalculate() }}
+          style={{ width: '70px', padding: '4px 6px', fontSize: '11px', fontFamily: 'var(--font-mono)', border: '1px solid var(--color-panel-border)', background: '#fff', color: '#000', outline: 'none' }}
+        />
+        <button
+          onClick={handleRecalculate}
+          disabled={loading}
+          className="clinical-btn clinical-btn-primary"
+          style={{ padding: '4px 10px', fontSize: '10px' }}
+        >
+          {loading ? 'Recalculating...' : 'Apply Projection'}
+        </button>
+      </div>
+
+      {/* Interactive Graph Box */}
+      <div style={{ background: '#ffffff', padding: '12px', borderRadius: '4px', border: '1px solid #cbd5e0', position: 'relative' }}>
+        <svg width="100%" height="100%" viewBox={`0 0 ${viewBoxWidth} ${viewBoxHeight}`} style={{ overflow: 'visible' }}>
+          {/* Horizontal Gridlines */}
+          {[0, 0.25, 0.5, 0.75, 1.0].map((ratio) => {
+            const y = padTop + ratio * plotH
+            return (
+              <g key={`grid-y-${ratio}`}>
+                <line x1={padLeft} y1={y} x2={padLeft + plotW} y2={y} stroke="#f0f0f0" strokeWidth="1" />
+                {/* Left labels (Volume) */}
+                <text x={padLeft - 8} y={y + 4} textAnchor="end" fontSize="9" fontFamily="var(--font-mono)" fill="#718096">
+                  {Math.round((1.0 - ratio) * maxVol)}
+                </text>
+                {/* Right labels (Cognitive Impact) */}
+                <text x={padLeft + plotW + 8} y={y + 4} textAnchor="start" fontSize="9" fontFamily="var(--font-mono)" fill="#718096">
+                  {Math.round((1.0 - ratio) * 100)}%
+                </text>
+              </g>
+            )
+          })}
+
+          {/* Vertical Gridlines & X labels */}
+          {timeline.map((pt) => {
+            const x = getX(pt.month)
+            return (
+              <g key={`grid-x-${pt.month}`}>
+                <line x1={x} y1={padTop} x2={x} y2={padTop + plotH} stroke="#f0f0f0" strokeWidth="1" />
+                <text x={x} y={padTop + plotH + 14} textAnchor="middle" fontSize="9" fontFamily="var(--font-mono)" fill="#718096">
+                  {pt.month}m
+                </text>
+              </g>
+            )
+          })}
+
+          {/* X Axis Line */}
+          <line x1={padLeft} y1={padTop + plotH} x2={padLeft + plotW} y2={padTop + plotH} stroke="#cbd5e0" strokeWidth="1.5" />
+          
+          {/* Left Y Axis (Volume) Label */}
+          <text x={10} y={15} fontSize="8" fontFamily="var(--font-mono)" fill="#4a5568" fontWeight="bold">VOL (cm³)</text>
+          
+          {/* Right Y Axis (Cognitive) Label */}
+          <text x={viewBoxWidth - 10} y={15} textAnchor="end" fontSize="8" fontFamily="var(--font-mono)" fill="#4a5568" fontWeight="bold">COG (%)</text>
+
+          {/* Line for Pathology Volume */}
+          {projection.pathology !== 'Normal' && (
+            <path d={pathVolD} fill="none" stroke="var(--color-accent-red)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+          )}
+
+          {/* Line for Edema Volume */}
+          {projection.pathology !== 'Normal' && (
+            <path d={pathEdemaD} fill="none" stroke="var(--color-accent-amber)" strokeWidth="2" strokeDasharray="3,3" strokeLinecap="round" strokeLinejoin="round" />
+          )}
+
+          {/* Line for Cognitive Impact */}
+          <path d={pathCogD} fill="none" stroke="var(--color-accent-blue)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+
+          {/* Interactive circles and transparent hover areas */}
+          {timeline.map((pt) => {
+            const x = getX(pt.month)
+            const yVol = getYVol(pt.pathology_volume_cm3)
+            const yEdema = getYVol(pt.edema_volume_cm3)
+            const yCog = getYCog(pt.cognitive_impact_pct)
+            const isHovered = selectedMonth === pt.month
+            const isLocked = lockedMonth === pt.month
+
+            return (
+              <g key={`points-${pt.month}`}>
+                {/* Pathology circle */}
+                {projection.pathology !== 'Normal' && (
+                  <circle cx={x} cy={yVol} r={isHovered || isLocked ? 5 : 3.5} fill="var(--color-accent-red)" stroke={isLocked ? "#000000" : "#ffffff"} strokeWidth={isLocked ? 2 : 1.5} />
+                )}
+                {/* Edema circle */}
+                {projection.pathology !== 'Normal' && (
+                  <circle cx={x} cy={yEdema} r={isHovered || isLocked ? 5 : 3.5} fill="var(--color-accent-amber)" stroke={isLocked ? "#000000" : "#ffffff"} strokeWidth={isLocked ? 2 : 1.5} />
+                )}
+                {/* Cognitive circle */}
+                <circle cx={x} cy={yCog} r={isHovered || isLocked ? 5 : 3.5} fill="var(--color-accent-blue)" stroke={isLocked ? "#000000" : "#ffffff"} strokeWidth={isLocked ? 2 : 1.5} />
+
+                {/* Vertical hover/lock line indicator */}
+                {(isHovered || isLocked) && (
+                  <line x1={x} y1={padTop} x2={x} y2={padTop + plotH} stroke={isLocked ? "#1a202c" : "#4a5568"} strokeWidth={isLocked ? 1.5 : 1} strokeDasharray={isLocked ? "none" : "2,2"} pointerEvents="none" />
+                )}
+
+                {/* Large transparent interactive hit area for easy hover on slice column */}
+                <rect
+                  x={x - 20}
+                  y={padTop}
+                  width="40"
+                  height={plotH}
+                  fill="transparent"
+                  style={{ cursor: 'pointer' }}
+                  onMouseEnter={() => onSelectMonth(pt.month)}
+                  onMouseLeave={() => onSelectMonth(lockedMonth || 0)}
+                  onClick={() => onToggleLock(pt.month)}
+                />
+              </g>
+            )
+          })}
+        </svg>
+
+        {/* Floating Tooltip inside chart area */}
+        {selectedPoint && (
+          <div style={{ position: 'absolute', top: '15px', left: selectedMonth > 12 ? '20px' : 'auto', right: selectedMonth <= 12 ? '20px' : 'auto', background: 'rgba(27, 38, 44, 0.95)', border: '1px solid var(--color-panel-border)', color: '#fff', padding: '8px 12px', borderRadius: '4px', fontSize: '11px', pointerEvents: 'none', minWidth: '180px', display: 'flex', flexDirection: 'column', gap: '3px', zIndex: 10 }}>
+            <div style={{ fontWeight: 'bold', borderBottom: '1px solid rgba(255,255,255,0.2)', paddingBottom: '3px', marginBottom: '3px' }}>
+              Milestone: {selectedPoint.month} Months {lockedMonth === selectedMonth ? '🔒' : ''}
+            </div>
+            {projection.pathology !== 'Normal' && (
+              <>
+                <div>Primary Pathology: <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 'bold', color: '#ff7675' }}>{selectedPoint.pathology_volume_cm3} cm³</span></div>
+                <div>Vasogenic Edema: <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 'bold', color: '#ffeaa7' }}>{selectedPoint.edema_volume_cm3} cm³</span></div>
+              </>
+            )}
+            <div>Healthy Brain: <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 'bold', color: '#55efc4' }}>{selectedPoint.healthy_brain_volume_cm3} cm³</span></div>
+            <div>Cognitive Deficit: <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 'bold', color: '#74b9ff' }}>{selectedPoint.cognitive_impact_pct}%</span></div>
+            <div>Severity Status: <span style={{ fontWeight: 'bold', color: selectedPoint.severity_level === 'Critical' ? '#ff7675' : selectedPoint.severity_level === 'Severe' ? '#fdcb6e' : '#55efc4' }}>{selectedPoint.severity_level.toUpperCase()}</span></div>
+          </div>
+        )}
+      </div>
+
+      {/* Legend */}
+      <div style={{ display: 'flex', justifyContent: 'center', gap: '20px', fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--color-text-main)' }}>
+        {projection.pathology !== 'Normal' && (
+          <>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ display: 'inline-block', width: '10px', height: '10px', background: 'var(--color-accent-red)', borderRadius: '2px' }} />
+              Pathology Volume
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ display: 'inline-block', width: '10px', height: '3px', borderTop: '2px dashed var(--color-accent-amber)', verticalAlign: 'middle' }} />
+              Vasogenic Edema
+            </span>
+          </>
+        )}
+        <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{ display: 'inline-block', width: '10px', height: '10px', background: 'var(--color-accent-blue)', borderRadius: '2px' }} />
+          Cognitive Deficit %
+        </span>
+      </div>
+
+      {/* Detailed Clinical Notes Box */}
+      <div style={{ background: '#f5f7f8', border: '1px solid var(--color-panel-border)', padding: '10px 12px', borderRadius: '4px' }}>
+        <div style={{ fontSize: '10px', fontWeight: 600, color: 'var(--color-text-dim)', textTransform: 'uppercase', marginBottom: '6px' }}>
+          Clinical Milestone Projection Notes (Click note to lock projection):
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px', maxHeight: '150px', overflowY: 'auto' }}>
+          {timeline.map((pt) => (
+            <div
+              key={pt.month}
+              style={{
+                display: 'flex',
+                gap: '8px',
+                padding: '6px',
+                borderLeft: `3px solid ${pt.severity_level === 'Critical' ? 'var(--color-accent-red)' : pt.severity_level === 'Severe' ? 'var(--color-accent-amber)' : 'var(--color-accent-blue)'}`,
+                background: selectedMonth === pt.month || (selectedMonth === 0 && lockedMonth === pt.month) ? '#eef2f5' : 'transparent',
+                fontWeight: lockedMonth === pt.month ? 'bold' : 'normal',
+                cursor: 'pointer',
+                borderRadius: '0 2px 2px 0',
+                transition: 'background 0.2s',
+              }}
+              onMouseEnter={() => onSelectMonth(pt.month)}
+              onMouseLeave={() => onSelectMonth(lockedMonth || 0)}
+              onClick={() => onToggleLock(pt.month)}
+            >
+              <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 'bold', width: '30px' }}>{pt.month}m:</span>
+              <div style={{ flex: 1 }}>
+                <span style={{ fontWeight: 'bold', color: 'var(--color-text-main)' }}>[{pt.severity_level.toUpperCase()}] </span>
+                <span style={{ color: 'var(--color-text-dim)' }}>{pt.clinical_note}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function colormapJet(v: number): [number, number, number] {
   const r = Math.min(Math.max(0, 4 * v - 1.5), 1.0) * 255
   const g = Math.min(Math.max(0, 3 - Math.abs(4 * v - 2)), 1.0) * 255
@@ -522,23 +1205,28 @@ function renderKSpace(
     ? kspaceData.data.subarray(startIndex, startIndex + sliceSize)
     : kspaceData.data.slice(startIndex, startIndex + sliceSize)
 
-  const gradcamSlice = gradcamData.data.subarray
+  let gradcamSlice = gradcamData.data.subarray
     ? gradcamData.data.subarray(startIndex, startIndex + sliceSize)
     : gradcamData.data.slice(startIndex, startIndex + sliceSize)
+
+  if (showOverlay) {
+    gradcamSlice = blur2D(gradcamSlice, width, height, 5)
+  }
 
   const imgData = ctx.createImageData(width, height)
 
   for (let i = 0; i < sliceSize; i++) {
     const kspaceVal = Math.floor(kspaceSlice[i] * 255)
-    const camVal = gradcamSlice[i]
+    const camVal = gradcamSlice ? gradcamSlice[i] : 0
     
     let r = kspaceVal
     let g = kspaceVal
     let b = kspaceVal
 
-    if (showOverlay && camVal > 0.01) {
-      const [rJet, gJet, bJet] = colormapJet(camVal)
-      const alpha = opacity * camVal
+    if (showOverlay && camVal > 0.10) {
+      const normVal = (camVal - 0.10) / 0.90
+      const [rJet, gJet, bJet] = colormapJet(normVal)
+      const alpha = Math.min(1.0, opacity * Math.pow(normVal, 1.2) * 1.4)
       r = Math.floor(rJet * alpha + kspaceVal * (1 - alpha))
       g = Math.floor(gJet * alpha + kspaceVal * (1 - alpha))
       b = Math.floor(bJet * alpha + kspaceVal * (1 - alpha))
@@ -573,7 +1261,7 @@ function KSpaceGradCAMViewer({ studyId }: { studyId: string }) {
   const [kspaceData, setKspaceData] = useState<{ shape: number[]; data: any } | null>(null)
   const [gradcamData, setGradcamData] = useState<{ shape: number[]; data: any } | null>(null)
   const [sliceIndex, setSliceIndex] = useState(0)
-  const [opacity, setOpacity] = useState(0.6)
+  const [opacity, setOpacity] = useState(0.85) // Boosted default opacity to 85% for brighter overlay upon initialization
   const [showOverlay, setShowOverlay] = useState(true)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
 
@@ -698,10 +1386,10 @@ function KSpaceGradCAMViewer({ studyId }: { studyId: string }) {
       </div>
       
       <div style={{ display: 'flex', gap: '14px', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ border: '1px solid #1a252f', background: '#000', padding: '4px', position: 'relative' }}>
-          <canvas ref={canvasRef} style={{ width: '220px', height: '220px', imageRendering: 'pixelated' }} />
-          <div style={{ position: 'absolute', top: '4px', left: '50%', transform: 'translateX(-50%)', fontSize: '11px', color: 'rgba(255,255,255,0.4)', fontFamily: 'var(--font-mono)' }}>ky (phase)</div>
-          <div style={{ position: 'absolute', top: '50%', right: '8px', transform: 'translateY(-50%)', fontSize: '11px', color: 'rgba(255,255,255,0.4)', fontFamily: 'var(--font-mono)' }}>kx (freq)</div>
+        <div className="bevel-inset" style={{ background: '#000', padding: '6px', position: 'relative', display: 'inline-block', borderRadius: '4px', boxShadow: 'inset 0 0 10px rgba(0,0,0,0.85)' }}>
+          <canvas ref={canvasRef} style={{ width: '220px', height: '220px', display: 'block', borderRadius: '2px' }} />
+          <div style={{ position: 'absolute', top: '6px', left: '50%', transform: 'translateX(-50%)', fontSize: '11px', color: 'rgba(255,255,255,0.4)', fontFamily: 'var(--font-mono)' }}>ky (phase)</div>
+          <div style={{ position: 'absolute', top: '50%', right: '10px', transform: 'translateY(-50%)', fontSize: '11px', color: 'rgba(255,255,255,0.4)', fontFamily: 'var(--font-mono)' }}>kx (freq)</div>
         </div>
 
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '8px', color: '#fff', fontSize: '13px' }}>
@@ -1265,6 +1953,16 @@ export default function App() {
   const [selectedReport, setSelectedReport] = useState<Report | null>(null)
   const [isEditing, setIsEditing] = useState(false)
   const [editImpression, setEditImpression] = useState('')
+
+  const [selectedProgressionMonth, setSelectedProgressionMonth] = useState<number>(0)
+  const [lockedProgressionMonth, setLockedProgressionMonth] = useState<number | null>(null)
+  const [progressionTimeline, setProgressionTimeline] = useState<ProgressionPoint[] | null>(null)
+
+  useEffect(() => {
+    setSelectedProgressionMonth(0)
+    setLockedProgressionMonth(null)
+    setProgressionTimeline(null)
+  }, [selectedStudy])
 
   useEffect(() => {
     if (selectedReport) {
@@ -1905,7 +2603,7 @@ export default function App() {
                       <span className="detail-label">Patient:</span>
                       <span className="detail-val">{selectedStudy.patient?.name}</span>
                       <span className="detail-label">DOB:</span>
-                      <span className="detail-val">{new Date(selectedStudy.patient?.dateOfBirth).toLocaleDateString()}</span>
+                      <span className="detail-val">{selectedStudy.patient?.dateOfBirth ? new Date(selectedStudy.patient.dateOfBirth).toLocaleDateString() : '—'}</span>
                       <span className="detail-label">Gender:</span>
                       <span className="detail-val" style={{ textTransform: 'uppercase' }}>{selectedStudy.patient?.gender}</span>
                       <span className="detail-label">Modality:</span>
@@ -1970,22 +2668,6 @@ export default function App() {
                               )}
                             </div>
                           )}
-                          {f?.reconstructedKey && (
-                            <div style={{ marginTop: '14px' }}>
-                              <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text-dim)', textTransform: 'uppercase', marginBottom: '8px' }}>
-                                MRI Slice Viewer
-                              </div>
-                              <ClinicalMRIViewer studyId={selectedStudy.id} />
-                            </div>
-                          )}
-                          {f?.reconstructedKey && (
-                            <div style={{ marginTop: '14px' }}>
-                              <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text-dim)', textTransform: 'uppercase', marginBottom: '8px' }}>
-                                K-Space Explainability (Grad-CAM Overlay)
-                              </div>
-                              <KSpaceGradCAMViewer studyId={selectedStudy.id} />
-                            </div>
-                          )}
                           {f?.artifactScores && (
                             <div style={{ marginTop: '10px' }}>
                               <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text-dim)', textTransform: 'uppercase', marginBottom: '6px' }}>Artifact Scores</div>
@@ -2003,6 +2685,44 @@ export default function App() {
                         </div>
                       )
                     })()}
+
+                    {selectedStudy.status === 'complete' && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginTop: '14px', borderTop: '1px solid var(--color-panel-border)', paddingTop: '14px' }}>
+                        <div>
+                          <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text-dim)', textTransform: 'uppercase', marginBottom: '8px' }}>
+                            MRI Slice Viewer
+                          </div>
+                          <ClinicalMRIViewer 
+                            studyId={selectedStudy.id} 
+                            selectedMonth={selectedProgressionMonth}
+                            timeline={progressionTimeline}
+                            onMonthChange={setSelectedProgressionMonth}
+                          />
+                        </div>
+                        <div>
+                          <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text-dim)', textTransform: 'uppercase', marginBottom: '8px' }}>
+                            K-Space Explainability (Grad-CAM Overlay)
+                          </div>
+                          <KSpaceGradCAMViewer studyId={selectedStudy.id} />
+                        </div>
+                        <ProgressionProjectionViewer
+                          studyId={selectedStudy.id}
+                          selectedMonth={selectedProgressionMonth}
+                          onSelectMonth={setSelectedProgressionMonth}
+                          lockedMonth={lockedProgressionMonth}
+                          onToggleLock={(m) => {
+                            if (lockedProgressionMonth === m) {
+                              setLockedProgressionMonth(null)
+                              setSelectedProgressionMonth(0)
+                            } else {
+                              setLockedProgressionMonth(m)
+                              setSelectedProgressionMonth(m)
+                            }
+                          }}
+                          onTimelineChange={setProgressionTimeline}
+                        />
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', fontStyle: 'italic', color: 'var(--color-text-dim)' }}>
@@ -2092,8 +2812,21 @@ export default function App() {
                     <tbody>
                       {patients.map((p) => {
                         const studyCount = studies.filter((s) => s.patientId === p.id).length
+                        const isSelected = selectedPatientId === p.id || brain3dSelectedPatientId === p.id
                         return (
-                          <tr key={p.id} style={{ cursor: 'default' }}>
+                          <tr
+                            key={p.id}
+                            onClick={() => {
+                              setSelectedPatientId(p.id)
+                              setBrain3dSelectedPatientId(p.id)
+                              addLog(`Active patient selected: ${p.name}`)
+                            }}
+                            style={{
+                              cursor: 'pointer',
+                              backgroundColor: isSelected ? '#dce8f0' : 'transparent',
+                              fontWeight: isSelected ? 'bold' : 'normal',
+                            }}
+                          >
                             <td style={{ fontWeight: 600 }}>{p.name}</td>
                             <td>{new Date(p.dateOfBirth).toLocaleDateString()}</td>
                             <td style={{ fontFamily: 'var(--font-mono)' }}>{p.gender}</td>
@@ -2319,7 +3052,7 @@ export default function App() {
                                   </tr>
                                   <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
                                     <td style={{ padding: '6px 10px', fontWeight: 'bold', color: '#4a5568', background: '#f7fafc', borderRight: '1px solid #e2e8f0' }}>Patient ID:</td>
-                                    <td style={{ padding: '6px 10px', color: '#2d3748', fontFamily: 'var(--font-mono)', fontSize: '11px', borderRight: '1px solid #e2e8f0' }}>{selectedReport.study?.patient?.id.substring(0, 8) ?? '—'}</td>
+                                    <td style={{ padding: '6px 10px', color: '#2d3748', fontFamily: 'var(--font-mono)', fontSize: '11px', borderRight: '1px solid #e2e8f0' }}>{selectedReport.study?.patient?.id ? selectedReport.study.patient.id.substring(0, 8) : '—'}</td>
                                     <td style={{ padding: '6px 10px', fontWeight: 'bold', color: '#4a5568', background: '#f7fafc', borderRight: '1px solid #e2e8f0' }}>Modality:</td>
                                     <td style={{ padding: '6px 10px', color: '#2d3748' }}>{selectedReport.study?.modality ?? 'MRI'} (3T)</td>
                                   </tr>
@@ -2406,7 +3139,7 @@ export default function App() {
                             </div>
                           )}
 
-                          {f.reconstructedKey && (
+                          {selectedReport.study?.status === 'complete' && (
                             <div style={{ border: '1px solid var(--color-panel-border)', padding: '12px', background: '#f5f7f8' }}>
                               <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text-dim)', textTransform: 'uppercase', marginBottom: '8px' }}>
                                 MRI Slice Reconstruction Preview
@@ -2415,7 +3148,7 @@ export default function App() {
                             </div>
                           )}
 
-                          {f.reconstructedKey && (
+                          {selectedReport.study?.status === 'complete' && (
                             <div style={{ border: '1px solid var(--color-panel-border)', padding: '12px', background: '#f5f7f8' }}>
                               <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text-dim)', textTransform: 'uppercase', marginBottom: '8px' }}>
                                 K-Space Explainability (Grad-CAM Overlay)

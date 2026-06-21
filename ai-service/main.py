@@ -20,6 +20,9 @@ from models import (
     PredictResponse,
     AnomalyScore,
     GatingDecision,
+    ProgressionRequest,
+    ProgressionResponse,
+    ProgressionPoint,
 )
 
 # Configure logging
@@ -1090,5 +1093,186 @@ def rag_generate_pdf(request: GeneratePdfRequest):
     except Exception as e:
         logger.error(f"PDF generation failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/predict/progression", response_model=ProgressionResponse)
+def progression_projection(request: ProgressionRequest):
+    """
+    Given a pathology class and initial volume, forecasts how the condition
+    would evolve over a 24-month period if untreated.
+    """
+    pathology = request.pathology
+    v0 = request.initial_pathology_volume_cm3
+    
+    # Establish baseline defaults for initial volumes based on pathology
+    default_volumes = {
+        "Normal": 0.0,
+        "Tumor_Glioma": 15.0,
+        "Ischemia": 25.0,
+        "MS_Lesions": 8.0,
+        "Hydrocephalus": 60.0,
+        "Atrophy": 35.0, # represented as ventricle volume
+        "Hemorrhage": 30.0,
+        "Cerebral_Cyst": 12.0,
+        "Edema": 10.0,
+        "AVM": 18.0,
+        "Cerebral_Microbleeds": 2.0
+    }
+    
+    init_vol = v0 if v0 is not None else default_volumes.get(pathology, 5.0)
+    
+    timeline = []
+    months = [0, 3, 6, 12, 18, 24]
+    
+    for m in months:
+        # Defaults
+        path_vol = 0.0
+        edema_vol = 0.0
+        healthy_vol = 1350.0
+        cog_impact = 0.0
+        severity = "Mild"
+        note = "No significant untreated progression expected."
+        
+        if pathology == "Normal":
+            severity = "Normal"
+            note = "Patient brain structures remain within normal limits."
+            
+        elif pathology == "Tumor_Glioma":
+            path_vol = init_vol * np.exp(0.08 * m)
+            edema_vol = 0.6 * path_vol + 1.0 + (m * 0.5)
+            healthy_vol = 1350.0 - 0.7 * (path_vol + edema_vol)
+            cog_impact = min(100.0, 10.0 + 0.8 * (path_vol + edema_vol))
+            if m == 0:
+                note = "Initial focal tumor mass identified with mild surrounding vasogenic edema."
+                severity = "Mild" if path_vol < 10 else "Moderate"
+            elif m <= 6:
+                note = "Progression of neoplastic growth and vasogenic edema. Mild compression on local parenchyma."
+                severity = "Moderate"
+            elif m <= 18:
+                note = "Marked tumor expansion. Local mass effect and midline shift beginning to manifest."
+                severity = "Severe"
+            else:
+                note = "Critical mass effect. Severe herniation risk, heavy midline shift, and significant intracranial pressure."
+                severity = "Critical"
+                
+        elif pathology == "Atrophy":
+            # Primary: Ventricles enlarging, healthy brain volume decreasing
+            path_vol = init_vol + 1.8 * m  # Ventricle expansion
+            healthy_vol = 1200.0 - 2.8 * m  # Cortical volume loss
+            cog_impact = min(100.0, 15.0 + 2.2 * m)
+            if m == 0:
+                note = "Mild enlargement of ventricles and prominent cortical sulci consistent with early atrophy."
+                severity = "Mild"
+            elif m <= 6:
+                note = "Gradual progressive enlargement of CSF spaces, widening of cortical sulci."
+                severity = "Moderate"
+            elif m <= 18:
+                note = "Severe loss of gray matter volume, prominent ventriculomegaly ex-vacuo."
+                severity = "Severe"
+            else:
+                note = "End-stage global cortical atrophy. Marked cognitive impairment and generalized tissue volume loss."
+                severity = "Critical"
+                
+        elif pathology == "MS_Lesions":
+            path_vol = init_vol + 0.5 * m + np.sin(m * 0.8) * 1.2
+            edema_vol = 1.5 + np.cos(m * 0.8) * 0.8
+            healthy_vol = 1300.0 - 0.9 * m
+            cog_impact = min(100.0, 12.0 + 1.8 * m)
+            if m == 0:
+                note = "Disseminated demyelinating plaques in periventricular white matter."
+                severity = "Mild"
+            elif m <= 6:
+                note = "Subacute lesion activity and variable local inflammation. Active demyelination plaques."
+                severity = "Moderate"
+            elif m <= 18:
+                note = "Confluent lesion burden. Secondary axonal loss and brain volume loss beginning to accelerate."
+                severity = "Severe"
+            else:
+                note = "Extensive plaque fusion, severe myelin depletion, and permanent neurological disability markers."
+                severity = "Critical"
+                
+        elif pathology == "Hydrocephalus":
+            # Ventricle volume grows rapidly then plateaus
+            path_vol = init_vol + 85.0 * (1.0 - np.exp(-0.12 * m))
+            healthy_vol = 1250.0 - 0.65 * (path_vol - init_vol)
+            cog_impact = min(100.0, 20.0 + 3.2 * m)
+            if m == 0:
+                note = "Ventriculomegaly with transependymal flow of CSF indicating active pressure elevation."
+                severity = "Moderate"
+            elif m <= 6:
+                note = "Progressive ventriculomegaly. Active compression on adjacent white matter tracts."
+                severity = "Severe"
+            elif m <= 18:
+                note = "Severe ventricular dilation. Thinning of corpus callosum and progressive periventricular damage."
+                severity = "Critical"
+            else:
+                note = "Chronic end-stage hydrocephalus. Severe cognitive, gait, and physiological impairment."
+                severity = "Critical"
+                
+        elif pathology == "Ischemia":
+            # Core slowly retracts/scars, edema peaks early and completely resolves
+            path_vol = init_vol * np.exp(-0.03 * m)
+            edema_vol = 15.0 * np.exp(-0.6 * m) if m > 0 else 15.0
+            healthy_vol = 1300.0 - path_vol - edema_vol
+            cog_impact = max(20.0, 50.0 - 0.9 * m)
+            if m == 0:
+                note = "Acute cytotoxic edema and ischemic core. Large region of high risk infarction."
+                severity = "Severe"
+            elif m <= 6:
+                note = "Resolution of cytotoxic edema. Liquefactive necrosis and tissue resorption in progress."
+                severity = "Moderate"
+            else:
+                note = "Residual encephalomalacia, gliosis, and focal volume loss (glial scar tissue)."
+                severity = "Mild" if path_vol < 15 else "Moderate"
+                
+        elif pathology == "Hemorrhage":
+            # Hematoma absorbs, edema resolves
+            path_vol = init_vol * np.exp(-0.09 * m)
+            edema_vol = 20.0 * np.exp(-0.5 * m) if m > 0 else 20.0
+            healthy_vol = 1320.0 - path_vol - edema_vol
+            cog_impact = max(15.0, 55.0 - 1.2 * m)
+            if m == 0:
+                note = "Acute intraparenchymal hematoma with significant surrounding vasogenic edema and mass effect."
+                severity = "Severe"
+            elif m <= 6:
+                note = "Clot resorption, breakdown of blood products (hemosiderin deposition), and resolving edema."
+                severity = "Moderate"
+            else:
+                note = "Complete hematoma resorption leaving a cystic cavity (slit-like defect) surrounded by hemosiderin staining."
+                severity = "Mild"
+                
+        else: # Generic default (Cyst, Edema, AVM, Microbleeds)
+            path_vol = init_vol + 0.1 * m
+            edema_vol = 2.0 + 0.1 * m
+            healthy_vol = 1330.0 - path_vol
+            cog_impact = min(100.0, 5.0 + 1.0 * m)
+            if m == 0:
+                note = f"Initial presentation of {pathology.replace('_', ' ')}."
+                severity = "Mild"
+            elif m <= 12:
+                note = f"Stable or extremely slow expansion of {pathology.replace('_', ' ')}."
+                severity = "Moderate"
+            else:
+                note = f"Chronic presentation of {pathology.replace('_', ' ')} with stable cognitive markers."
+                severity = "Moderate"
+
+        timeline.append(
+            ProgressionPoint(
+                month=m,
+                pathology_volume_cm3=round(float(path_vol), 2),
+                edema_volume_cm3=round(float(edema_vol), 2),
+                healthy_brain_volume_cm3=round(float(healthy_vol), 2),
+                cognitive_impact_pct=round(float(cog_impact), 1),
+                severity_level=severity,
+                clinical_note=note
+            )
+        )
+        
+    return ProgressionResponse(
+        status="success",
+        pathology=pathology,
+        initial_volume_cm3=round(float(init_vol), 2),
+        timeline=timeline
+    )
 
 

@@ -89,3 +89,26 @@ class PredictResponse(BaseModel):
     kspace_log_mag_key: Optional[str] = Field(default=None, description="MinIO key where the K-space log-magnitude is stored")
     reconstructed_gradcam_key: Optional[str] = Field(default=None, description="MinIO key where the reconstructed image Grad-CAM overlay is stored")
     message: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Progression Projection Models
+# ---------------------------------------------------------------------------
+class ProgressionRequest(BaseModel):
+    pathology: str = Field(..., description="Pathology class name")
+    initial_pathology_volume_cm3: Optional[float] = Field(default=None, description="Optional custom initial pathology volume in cm3")
+
+class ProgressionPoint(BaseModel):
+    month: int = Field(..., description="Timeline month index")
+    pathology_volume_cm3: float = Field(..., description="Forecasted primary pathology volume in cm3")
+    edema_volume_cm3: float = Field(..., description="Forecasted secondary edema volume in cm3")
+    healthy_brain_volume_cm3: float = Field(..., description="Forecasted healthy brain tissue volume in cm3")
+    cognitive_impact_pct: float = Field(..., description="Forecasted cognitive impairment impact percentage [0, 100]")
+    severity_level: str = Field(..., description="Mild, Moderate, Severe, or Critical")
+    clinical_note: str = Field(..., description="Clinical projection summary for this milestone")
+
+class ProgressionResponse(BaseModel):
+    status: str = Field(..., description="'success' or 'error'")
+    pathology: str
+    initial_volume_cm3: float
+    timeline: list[ProgressionPoint]

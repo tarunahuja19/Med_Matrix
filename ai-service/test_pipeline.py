@@ -199,3 +199,37 @@ def test_predict_endpoint_with_kspace_explainability():
         assert uploaded_files["test-predict-study-123/kspace_gradcam.npy"].shape == (8, 128, 128)
         assert uploaded_files["test-predict-study-123/kspace_log_mag.npy"].shape == (8, 128, 128)
         assert uploaded_files["test-predict-study-123/reconstructed_gradcam.npy"].shape == (8, 256, 256)
+
+
+def test_progression_projection_endpoint():
+    # Test Tumor_Glioma projection
+    payload = {
+        "pathology": "Tumor_Glioma",
+        "initial_pathology_volume_cm3": 12.5
+    }
+    response = client.post("/predict/progression", json=payload)
+    assert response.status_code == 200
+    json_data = response.json()
+    assert json_data["status"] == "success"
+    assert json_data["pathology"] == "Tumor_Glioma"
+    assert json_data["initial_volume_cm3"] == 12.5
+    assert len(json_data["timeline"]) == 6
+    
+    # Test a point in the timeline
+    point = json_data["timeline"][0]
+    assert point["month"] == 0
+    assert point["pathology_volume_cm3"] == 12.5
+    assert "edema_volume_cm3" in point
+    assert "healthy_brain_volume_cm3" in point
+    assert "cognitive_impact_pct" in point
+    assert "severity_level" in point
+    assert "clinical_note" in point
+
+    # Test default volume fallback
+    payload_default = {
+        "pathology": "Hydrocephalus"
+    }
+    response_default = client.post("/predict/progression", json=payload_default)
+    assert response_default.status_code == 200
+    json_default = response_default.json()
+    assert json_default["initial_volume_cm3"] == 60.0
