@@ -515,7 +515,7 @@ function ClinicalMRIViewer({
   const [arrayData, setArrayData] = useState<{ shape: number[]; data: any } | null>(null)
   const [gradcamData, setGradcamData] = useState<{ shape: number[]; data: any } | null>(null)
   const [sliceIndex, setSliceIndex] = useState(0)
-  const [opacity, setOpacity] = useState(0.85) // Boosted default opacity to 85% for brighter overlay upon initialization
+  const [opacity, setOpacity] = useState(0.60) // Default opacity to 60% as requested
   const [showOverlay, setShowOverlay] = useState(false)
   const [showGrowth, setShowGrowth] = useState(false)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -1746,7 +1746,7 @@ function KSpaceGradCAMViewer({ studyId }: { studyId: string }) {
   const [kspaceData, setKspaceData] = useState<{ shape: number[]; data: any } | null>(null)
   const [gradcamData, setGradcamData] = useState<{ shape: number[]; data: any } | null>(null)
   const [sliceIndex, setSliceIndex] = useState(0)
-  const [opacity, setOpacity] = useState(0.85) // Boosted default opacity to 85% for brighter overlay upon initialization
+  const [opacity, setOpacity] = useState(0.60) // Default opacity to 60% as requested
   const [showOverlay, setShowOverlay] = useState(false)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
 
