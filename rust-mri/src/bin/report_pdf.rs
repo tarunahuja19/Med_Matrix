@@ -105,7 +105,7 @@ fn parse_report(content: &str) -> RadiologyReport {
     report.study_date = "Unknown".to_string();
     report.modality = "MRI (3T)".to_string();
 
-    let mut current_section = "";
+    let mut current_section = "clinical";
     let mut clinical_lines = Vec::new();
     let mut technique_lines = Vec::new();
     let mut findings_lines = Vec::new();
@@ -153,19 +153,19 @@ fn parse_report(content: &str) -> RadiologyReport {
         }
 
         let clean_upper = trimmed.replace('*', "").replace('#', "").replace(':', "").trim().to_uppercase();
-        if clean_upper == "CLINICAL INDICATION" {
+        if clean_upper == "CLINICAL INDICATION" || clean_upper == "PATIENT-FRIENDLY MRI SUMMARY" {
             current_section = "clinical";
             continue;
-        } else if clean_upper == "TECHNIQUE" {
+        } else if clean_upper == "TECHNIQUE" || clean_upper == "EXPLANATION OF TECH" {
             current_section = "technique";
             continue;
-        } else if clean_upper == "FINDINGS" {
+        } else if clean_upper == "FINDINGS" || clean_upper == "DETAILED EXPLANATION" {
             current_section = "findings";
             continue;
-        } else if clean_upper == "IMPRESSION" {
+        } else if clean_upper == "IMPRESSION" || clean_upper == "WHAT WAS FOUND" {
             current_section = "impression";
             continue;
-        } else if clean_upper == "RECOMMENDATION" {
+        } else if clean_upper == "RECOMMENDATION" || clean_upper == "NEXT STEPS & RECOMMENDATIONS" || clean_upper == "NEXT STEPS AND RECOMMENDATIONS" {
             current_section = "recommendation";
             continue;
         } else if clean_upper.starts_with("---") || clean_upper.starts_with("RADIOLOGY REPORT") {
@@ -427,6 +427,7 @@ fn draw_imaging_section(
     kspace_path: Option<&str>,
     start_y: f32,
     _max_width: f32,
+    for_patient: bool,
 ) -> f32 {
     draw_section_header(layer, font_bold, "Imaging", start_y);
     let box_top = start_y - 12.0;
@@ -434,30 +435,41 @@ fn draw_imaging_section(
     let mut mri_drawn = false;
     let mut kspace_drawn = false;
 
-    if let Some(mri) = mri_path {
-        if draw_image_at(layer, mri, 40.0, box_top, 250.0, 250.0).is_ok() {
-            draw_text_line(layer, "Reconstructed MRI Slice (Middle)", font_bold, 9.5, 40.0, box_top - 262.0, 4.0/255.0, 44.0/255.0, 83.0/255.0);
-            mri_drawn = true;
+    if for_patient {
+        if let Some(mri) = mri_path {
+            if draw_image_at(layer, mri, 172.5, box_top, 250.0, 250.0).is_ok() {
+                draw_text_line(layer, "Reconstructed MRI Slice (Middle)", font_bold, 9.5, 212.5, box_top - 262.0, 4.0/255.0, 44.0/255.0, 83.0/255.0);
+                mri_drawn = true;
+            }
         }
-    }
-
-    if let Some(kspace) = kspace_path {
-        if draw_image_at(layer, kspace, 305.0, box_top, 250.0, 250.0).is_ok() {
-            draw_text_line(layer, "K-Space Log-Magnitude (Middle)", font_bold, 9.5, 305.0, box_top - 262.0, 4.0/255.0, 44.0/255.0, 83.0/255.0);
-            kspace_drawn = true;
+        if !mri_drawn {
+            draw_rect_filled(layer, 172.5, box_top - 250.0, 250.0, 250.0, 240.0/255.0, 244.0/255.0, 248.0/255.0);
+            draw_text_line(layer, "[MRI Image Missing]", font_bold, 10.0, 242.5, box_top - 125.0, 24.0/255.0, 95.0/255.0, 165.0/255.0);
         }
-    }
+    } else {
+        if let Some(mri) = mri_path {
+            if draw_image_at(layer, mri, 40.0, box_top, 250.0, 250.0).is_ok() {
+                draw_text_line(layer, "Reconstructed MRI Slice (Middle)", font_bold, 9.5, 40.0, box_top - 262.0, 4.0/255.0, 44.0/255.0, 83.0/255.0);
+                mri_drawn = true;
+            }
+        }
 
-    // Draw placeholder for MRI if missing but K-space is drawn
-    if !mri_drawn && kspace_drawn {
-        draw_rect_filled(layer, 40.0, box_top - 250.0, 250.0, 250.0, 240.0/255.0, 244.0/255.0, 248.0/255.0);
-        draw_text_line(layer, "[MRI Image Missing]", font_bold, 10.0, 110.0, box_top - 125.0, 24.0/255.0, 95.0/255.0, 165.0/255.0);
-    }
+        if let Some(kspace) = kspace_path {
+            if draw_image_at(layer, kspace, 305.0, box_top, 250.0, 250.0).is_ok() {
+                draw_text_line(layer, "K-Space Log-Magnitude (Middle)", font_bold, 9.5, 305.0, box_top - 262.0, 4.0/255.0, 44.0/255.0, 83.0/255.0);
+                kspace_drawn = true;
+            }
+        }
 
-    // Draw placeholder for K-space if missing but MRI is drawn
-    if mri_drawn && !kspace_drawn {
-        draw_rect_filled(layer, 305.0, box_top - 250.0, 250.0, 250.0, 240.0/255.0, 244.0/255.0, 248.0/255.0);
-        draw_text_line(layer, "[K-Space Image Missing]", font_bold, 10.0, 375.0, box_top - 125.0, 24.0/255.0, 95.0/255.0, 165.0/255.0);
+        if !mri_drawn && kspace_drawn {
+            draw_rect_filled(layer, 40.0, box_top - 250.0, 250.0, 250.0, 240.0/255.0, 244.0/255.0, 248.0/255.0);
+            draw_text_line(layer, "[MRI Image Missing]", font_bold, 10.0, 110.0, box_top - 125.0, 24.0/255.0, 95.0/255.0, 165.0/255.0);
+        }
+
+        if mri_drawn && !kspace_drawn {
+            draw_rect_filled(layer, 305.0, box_top - 250.0, 250.0, 250.0, 240.0/255.0, 244.0/255.0, 248.0/255.0);
+            draw_text_line(layer, "[K-Space Image Missing]", font_bold, 10.0, 375.0, box_top - 125.0, 24.0/255.0, 95.0/255.0, 165.0/255.0);
+        }
     }
 
     if mri_drawn || kspace_drawn {
@@ -518,8 +530,10 @@ fn draw_impression_section(
     items: &[String],
     start_y: f32,
     max_width: f32,
+    label: &str,
+    for_patient: bool,
 ) -> f32 {
-    draw_section_header(layer, font_bold, "Impression", start_y);
+    draw_section_header(layer, font_bold, label, start_y);
     let box_top = start_y - 12.0;
 
     let line_height = 16.0;
@@ -529,7 +543,11 @@ fn draw_impression_section(
     
     let mut wrapped_items = Vec::new();
     for (i, item) in items.iter().enumerate() {
-        let full_text = format!("{}. {}", i + 1, item);
+        let full_text = if for_patient {
+            item.to_string()
+        } else {
+            format!("{}. {}", i + 1, item)
+        };
         let lines = wrap_text(&full_text, list_max_width, 13.0, false);
         wrapped_items.push(lines);
     }
@@ -643,10 +661,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut patient_id_override: Option<String> = None;
     let mut study_date_override: Option<String> = None;
     let mut modality_override: Option<String> = None;
+    let mut for_patient = false;
 
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
+            "--for-patient" => {
+                for_patient = true;
+                i += 1;
+            }
             "--input" => {
                 if i + 1 < args.len() {
                     input_path = args[i + 1].clone();
@@ -888,12 +911,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 3. Draw BODY SECTIONS dynamically
     
+    let label_clinical = if for_patient { "Patient MRI Summary" } else { "Clinical Indication" };
+    let label_technique = if for_patient { "Explanation of Tech" } else { "Technique" };
+    let label_findings = if for_patient { "Detailed Explanation" } else { "Findings" };
+    let label_impression = if for_patient { "What Was Found" } else { "Impression" };
+    let label_recommendation = if for_patient { "Next Steps & Recommendations" } else { "Recommendation" };
+
     // a. Clinical indication
-    draw_standard_section(&mut state, &report, "Clinical Indication", &report.clinical_indication, 515.0);
+    draw_standard_section(&mut state, &report, label_clinical, &report.clinical_indication, 515.0);
     state.y_cursor -= 15.0;
 
     // b. Technique
-    draw_standard_section(&mut state, &report, "Technique", &report.technique, 515.0);
+    draw_standard_section(&mut state, &report, label_technique, &report.technique, 515.0);
     state.y_cursor -= 15.0;
 
     // c. Imaging
@@ -907,16 +936,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         kspace_override.as_deref(),
         state.y_cursor,
         515.0,
+        for_patient,
     ) - 15.0;
 
     // d. Findings
-    draw_standard_section(&mut state, &report, "Findings", &report.findings, 515.0);
+    draw_standard_section(&mut state, &report, label_findings, &report.findings, 515.0);
     state.y_cursor -= 15.0;
 
     // e. Impression
     let mut total_lines = 0;
     for (i, item) in report.impression.iter().enumerate() {
-        let full_text = format!("{}. {}", i + 1, item);
+        let full_text = if for_patient {
+            item.to_string()
+        } else {
+            format!("{}. {}", i + 1, item)
+        };
         let lines = wrap_text(&full_text, 485.0, 13.0, false);
         total_lines += lines.len();
     }
@@ -932,10 +966,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &report.impression,
         state.y_cursor,
         515.0,
+        label_impression,
+        for_patient,
     ) - 15.0;
 
     // f. Recommendation
-    draw_standard_section(&mut state, &report, "Recommendation", &report.recommendation, 515.0);
+    draw_standard_section(&mut state, &report, label_recommendation, &report.recommendation, 515.0);
     state.y_cursor -= 15.0;
 
     // 4. Draw FOOTER on the last page

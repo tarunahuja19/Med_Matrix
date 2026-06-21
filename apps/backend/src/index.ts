@@ -27,7 +27,7 @@ app.get('/patients', async (_req, res) => {
 })
 
 app.post('/patients', async (req, res) => {
-  const { name, dateOfBirth, gender } = req.body
+  const { name, dateOfBirth, gender, phone } = req.body
 
   if (!name || !dateOfBirth || !gender) {
     res.status(400).json({ error: 'name, dateOfBirth, and gender are required' })
@@ -39,6 +39,7 @@ app.post('/patients', async (req, res) => {
       name,
       dateOfBirth: new Date(dateOfBirth),
       gender,
+      phone: phone || null,
     },
   })
 
@@ -77,6 +78,8 @@ app.post('/reports/backfill', async (_req, res) => {
         OR: [
           { impression: null },
           { impression: '' },
+          { patientImpression: null },
+          { patientImpression: '' },
         ],
       },
       include: {
@@ -130,24 +133,45 @@ app.post('/reports/backfill', async (_req, res) => {
           age--
         }
 
-        const generatedReport = await aiClient.generateRagReport(
-          pathologyName,
-          {
-            name: patient.name,
-            age: age,
-            gender: patient.gender,
-            dateOfBirth: patient.dateOfBirth.toISOString(),
-            symptoms: pathologyName === 'Normal'
-              ? 'Routine check'
-              : `Suspected ${pathologyName.replace(/_/g, ' ')}`,
-            studyDate: study.studyDate.toISOString(),
-          }
-        )
+        const patientMetadata = {
+          name: patient.name,
+          age: age,
+          gender: patient.gender,
+          dateOfBirth: patient.dateOfBirth.toISOString(),
+          symptoms: pathologyName === 'Normal'
+            ? 'Routine check'
+            : `Suspected ${pathologyName.replace(/_/g, ' ')}`,
+          studyDate: study.studyDate.toISOString(),
+        }
 
-        if (generatedReport) {
+        const dataToUpdate: any = {}
+
+        if (!report.impression) {
+          const generatedReport = await aiClient.generateRagReport(
+            pathologyName,
+            patientMetadata,
+            false
+          )
+          if (generatedReport) {
+            dataToUpdate.impression = generatedReport
+          }
+        }
+
+        if (!report.patientImpression) {
+          const generatedPatientReport = await aiClient.generateRagReport(
+            pathologyName,
+            patientMetadata,
+            true
+          )
+          if (generatedPatientReport) {
+            dataToUpdate.patientImpression = generatedPatientReport
+          }
+        }
+
+        if (Object.keys(dataToUpdate).length > 0) {
           await prisma.report.update({
             where: { id: report.id },
-            data: { impression: generatedReport },
+            data: dataToUpdate,
           })
           results.push({ reportId: report.id, status: 'success' })
           successCount++
@@ -172,13 +196,14 @@ app.post('/reports/backfill', async (_req, res) => {
 
 app.put('/reports/:id', async (req, res) => {
   const { id } = req.params
-  const { impression, status } = req.body
+  const { impression, patientImpression, status } = req.body
 
   try {
     const updatedReport = await prisma.report.update({
       where: { id },
       data: {
         impression,
+        patientImpression,
         status: status ?? 'draft',
       },
       include: {
@@ -195,7 +220,62 @@ app.put('/reports/:id', async (req, res) => {
   }
 })
 
-app.get('/reports/:id/pdf', async (req, res) => {
+// Helper to generate the PDF buffer for a report (Professional or Patient summary)
+async function generateReportPdfBuffer(reportId: string, forPatient: boolean): Promise<Buffer> {
+  const report = await prisma.report.findUnique({
+    where: { id: reportId },
+    include: {
+      study: {
+        include: {
+          patient: true,
+        },
+      },
+    },
+  })
+
+  if (!report || !report.study || !report.study.patient) {
+    throw new Error('Report or patient details not found')
+  }
+
+  const { study } = report
+  const { patient } = study
+
+  // Calculate age
+  const dob = new Date(patient.dateOfBirth)
+  const today = new Date()
+  let age = today.getFullYear() - dob.getFullYear()
+  const m = today.getMonth() - dob.getMonth()
+  if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) {
+    age--
+  }
+
+  // Call ai-service generate-pdf
+  const aiServiceUrl = process.env.AI_SERVICE_URL ?? 'http://ai-service:8000'
+  const reportText = forPatient ? (report.patientImpression ?? '') : (report.impression ?? '')
+
+  const response = await axios.post(`${aiServiceUrl}/rag/generate-pdf`, {
+    report_text: reportText,
+    patient_metadata: {
+      name: patient.name,
+      age: age,
+      sex: patient.gender === 'M' ? 'M' : patient.gender === 'F' ? 'F' : 'Other',
+      physician: 'Dr. Tarun Ahuja, MD',
+      report_id: report.id.substring(0, 8),
+      patient_id: patient.id.substring(0, 8),
+      study_date: new Date(study.studyDate).toLocaleDateString('en-US'),
+      modality: study.modality === 'MRI' ? 'MRI (3T)' : study.modality,
+      date: new Date(report.createdAt).toLocaleDateString('en-US')
+    },
+    study_id: report.studyId,
+    for_patient: forPatient
+  }, {
+    responseType: 'arraybuffer'
+  })
+
+  return Buffer.from(response.data)
+}
+
+app.post('/reports/:id/send-whatsapp', async (req, res) => {
   const { id } = req.params
   try {
     const report = await prisma.report.findUnique({
@@ -209,47 +289,103 @@ app.get('/reports/:id/pdf', async (req, res) => {
       },
     })
 
-    if (!report || !report.study || !report.study.patient) {
+    if (!report) {
       res.status(404).json({ error: 'Report not found' })
       return
     }
 
-    const { study } = report
-    const { patient } = study
-
-    // Calculate age
-    const dob = new Date(patient.dateOfBirth)
-    const today = new Date()
-    let age = today.getFullYear() - dob.getFullYear()
-    const m = today.getMonth() - dob.getMonth()
-    if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) {
-      age--
+    const patient = report.study?.patient
+    if (!patient) {
+      res.status(404).json({ error: 'Patient not found' })
+      return
     }
 
-    // Call ai-service generate-pdf
-    const aiServiceUrl = process.env.AI_SERVICE_URL ?? 'http://ai-service:8000'
+    // Fallback to default test phone number if not registered
+    const rawPhone = patient.phone || '+919974202309'
+    let cleanPhone = rawPhone.replace(/\D/g, '')
+    if (!cleanPhone.startsWith('+')) {
+      cleanPhone = `+${cleanPhone}`
+    }
 
-    const response = await axios.post(`${aiServiceUrl}/rag/generate-pdf`, {
-      report_text: report.impression ?? '',
-      patient_metadata: {
-        name: patient.name,
-        age: age,
-        sex: patient.gender === 'M' ? 'M' : patient.gender === 'F' ? 'F' : 'Other',
-        physician: 'Dr. Tarun Ahuja, MD',
-        report_id: report.id.substring(0, 8),
-        patient_id: patient.id.substring(0, 8),
-        study_date: new Date(study.studyDate).toLocaleDateString('en-US'),
-        modality: study.modality === 'MRI' ? 'MRI (3T)' : study.modality,
-        date: new Date(report.createdAt).toLocaleDateString('en-US')
-      },
-      study_id: report.studyId
-    }, {
-      responseType: 'arraybuffer'
+    const patientName = patient.name.replace(/\s+/g, '_')
+    const filename = `patient_report_${patientName}_${report.id.substring(0, 8)}.pdf`
+
+    console.log(`[Twilio WhatsApp] Generating PDF report for ${patient.name}...`)
+    const pdfBuffer = await generateReportPdfBuffer(id, true)
+
+    console.log(`[Twilio WhatsApp] Uploading PDF buffer to tmpfiles.org...`)
+    const formData = new globalThis.FormData()
+    formData.append('file', new Blob([new Uint8Array(pdfBuffer)], { type: 'application/pdf' }), filename)
+
+    const uploadResponse = await fetch('https://tmpfiles.org/api/v1/upload', {
+      method: 'POST',
+      body: formData,
     })
 
+    const responseData = await uploadResponse.json()
+    if (responseData.status !== 'success' || !responseData.data?.url) {
+      throw new Error(`Failed to upload file to tmpfiles.org: ${JSON.stringify(responseData)}`)
+    }
+
+    const publicMediaUrl = responseData.data.url.replace('https://tmpfiles.org/', 'https://tmpfiles.org/dl/')
+    console.log(`[Twilio WhatsApp] PDF successfully uploaded. Public Link: ${publicMediaUrl}`)
+
+    // Twilio configurations
+    const accountSid = process.env.TWILIO_ACCOUNT_SID
+    const authToken = process.env.TWILIO_AUTH_TOKEN
+    const fromNumber = process.env.TWILIO_SENDER_NUMBER
+
+    if (!accountSid || !authToken || !fromNumber) {
+      throw new Error('Twilio configurations (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, or TWILIO_SENDER_NUMBER) are missing from environment variables')
+    }
+
+    console.log(`[Twilio WhatsApp] Sending PDF document to ${cleanPhone} via Twilio...`)
+
+    const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`
+    const authHeader = 'Basic ' + Buffer.from(`${accountSid}:${authToken}`).toString('base64')
+
+    const params = new URLSearchParams()
+    params.append('From', `whatsapp:${fromNumber}`)
+    params.append('To', `whatsapp:${cleanPhone}`)
+    params.append('MediaUrl', publicMediaUrl)
+    params.append('Body', `Hello ${patient.name}, here is your patient-friendly Brain MRI report summary.`)
+
+    const twilioResponse = await axios.post(twilioUrl, params.toString(), {
+      headers: {
+        'Authorization': authHeader,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+    })
+
+    console.log(`[Twilio WhatsApp] Delivered! Twilio SID: ${twilioResponse.data.sid}`)
+
+    res.json({ success: true, phone: cleanPhone, filename, sid: twilioResponse.data.sid })
+  } catch (err: any) {
+    const errorDetails = err.response?.data || err.message
+    console.error('[Twilio WhatsApp] Error:', errorDetails)
+    res.status(500).json({ error: err.message, details: errorDetails })
+  }
+})
+
+app.get('/reports/:id/pdf', async (req, res) => {
+  const { id } = req.params
+  const forPatient = req.query.forPatient === 'true'
+  try {
+    const pdfBuffer = await generateReportPdfBuffer(id, forPatient)
+    
+    const report = await prisma.report.findUnique({
+      where: { id },
+      include: { study: { include: { patient: true } } }
+    })
+    const patientName = report?.study?.patient?.name.replace(/\s+/g, '_') || 'patient'
+
+    const filename = forPatient
+      ? `patient_report_${patientName}_${id.substring(0, 8)}.pdf`
+      : `radiology_report_${patientName}_${id.substring(0, 8)}.pdf`
+
     res.setHeader('Content-Type', 'application/pdf')
-    res.setHeader('Content-Disposition', `attachment; filename=radiology_report_${patient.name.replace(/\s+/g, '_')}_${report.id.substring(0, 8)}.pdf`)
-    res.send(response.data)
+    res.setHeader('Content-Disposition', `attachment; filename=${filename}`)
+    res.send(pdfBuffer)
   } catch (err: any) {
     console.error('[backend] Failed to generate report PDF:', err.message)
     res.status(500).json({ error: `PDF generation failed: ${err.message}` })

@@ -812,11 +812,13 @@ class RagQueryRequest(BaseModel):
     disease_name: str
     patient_metadata: dict
     llm_model: str = "gemini-3.5-flash"
+    for_patient: bool = False
 
 class GeneratePdfRequest(BaseModel):
     report_text: str
     patient_metadata: dict = {}
     study_id: str | None = None
+    for_patient: bool = False
 
 def generate_kspace_log_mag_npy(study_id: str) -> np.ndarray | None:
     try:
@@ -875,7 +877,7 @@ def generate_kspace_log_mag_npy(study_id: str) -> np.ndarray | None:
         logger.error(f"Failed to dynamically generate kspace log mag: {e}")
         return None
 
-def compile_pdf_with_rust(report_text: str, patient_metadata: dict, study_id: str | None = None) -> bytes:
+def compile_pdf_with_rust(report_text: str, patient_metadata: dict, study_id: str | None = None, for_patient: bool = False) -> bytes:
     import subprocess
     import tempfile
     import os
@@ -911,6 +913,9 @@ def compile_pdf_with_rust(report_text: str, patient_metadata: dict, study_id: st
             f_out_name = f_out.name
 
         cmd = [binary_path, "--input", f_in_name, "--output", f_out_name]
+        
+        if for_patient:
+            cmd.append("--for-patient")
         
         if "name" in patient_metadata:
             cmd.extend(["--name", str(patient_metadata["name"])])
@@ -966,45 +971,46 @@ def compile_pdf_with_rust(report_text: str, patient_metadata: dict, study_id: st
                 logger.error(f"Failed to fetch/convert MRI image for PDF: {mri_err}")
 
             # 2. K-Space log-magnitude image
-            kspace_data = None
-            try:
-                with tempfile.NamedTemporaryFile(suffix='.npy', delete=False) as tmp_npy:
-                    tmp_npy_path = tmp_npy.name
-                
-                logger.info(f"Downloading kspace_log_mag.npy for study {study_id} from MinIO...")
-                minio_client.fget_object(
-                    bucket_name="reconstructed",
-                    object_name=f"{study_id}/kspace_log_mag.npy",
-                    file_path=tmp_npy_path
-                )
-                
-                kspace_data = np.load(tmp_npy_path)
-                os.remove(tmp_npy_path)
-            except Exception as ksp_err:
-                logger.warning(f"kspace_log_mag.npy not found for study {study_id}, trying dynamic generation...")
-                kspace_data = generate_kspace_log_mag_npy(study_id)
-                if kspace_data is None:
-                    logger.error(f"Failed to fetch/convert K-space image for PDF: {ksp_err}")
-
-            if kspace_data is not None:
+            if not for_patient:
+                kspace_data = None
                 try:
-                    if kspace_data.ndim >= 3:
-                        slice_data = kspace_data[kspace_data.shape[0] // 2]
-                    else:
-                        slice_data = kspace_data
+                    with tempfile.NamedTemporaryFile(suffix='.npy', delete=False) as tmp_npy:
+                        tmp_npy_path = tmp_npy.name
                     
-                    s_min, s_max = slice_data.min(), slice_data.max()
-                    denom = s_max - s_min
-                    normalized = (slice_data - s_min) / denom * 255.0 if denom > 1e-8 else np.zeros_like(slice_data)
-                    img = PILImage.fromarray(normalized.astype(np.uint8))
+                    logger.info(f"Downloading kspace_log_mag.npy for study {study_id} from MinIO...")
+                    minio_client.fget_object(
+                        bucket_name="reconstructed",
+                        object_name=f"{study_id}/kspace_log_mag.npy",
+                        file_path=tmp_npy_path
+                    )
                     
-                    with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_png:
-                        kspace_png_path = tmp_png.name
-                    img.save(kspace_png_path, "PNG")
-                    cmd.extend(["--kspace", kspace_png_path])
-                    logger.info(f"Successfully generated temporary K-Space PNG: {kspace_png_path}")
-                except Exception as img_err:
-                    logger.error(f"Failed to convert K-space numpy to PNG: {img_err}")
+                    kspace_data = np.load(tmp_npy_path)
+                    os.remove(tmp_npy_path)
+                except Exception as ksp_err:
+                    logger.warning(f"kspace_log_mag.npy not found for study {study_id}, trying dynamic generation...")
+                    kspace_data = generate_kspace_log_mag_npy(study_id)
+                    if kspace_data is None:
+                        logger.error(f"Failed to fetch/convert K-space image for PDF: {ksp_err}")
+
+                if kspace_data is not None:
+                    try:
+                        if kspace_data.ndim >= 3:
+                            slice_data = kspace_data[kspace_data.shape[0] // 2]
+                        else:
+                            slice_data = kspace_data
+                        
+                        s_min, s_max = slice_data.min(), slice_data.max()
+                        denom = s_max - s_min
+                        normalized = (slice_data - s_min) / denom * 255.0 if denom > 1e-8 else np.zeros_like(slice_data)
+                        img = PILImage.fromarray(normalized.astype(np.uint8))
+                        
+                        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_png:
+                            kspace_png_path = tmp_png.name
+                        img.save(kspace_png_path, "PNG")
+                        cmd.extend(["--kspace", kspace_png_path])
+                        logger.info(f"Successfully generated temporary K-Space PNG: {kspace_png_path}")
+                    except Exception as img_err:
+                        logger.error(f"Failed to convert K-space numpy to PNG: {img_err}")
 
         logger.info(f"Invoking Rust PDF generator: {' '.join(cmd)}")
         res = subprocess.run(cmd, capture_output=True, text=True, check=True)
@@ -1047,7 +1053,8 @@ def rag_query(request: RagQueryRequest):
         report = generate_radiology_report(
             disease_name=request.disease_name,
             patient_metadata=request.patient_metadata,
-            llm_model=request.llm_model
+            llm_model=request.llm_model,
+            for_patient=request.for_patient
         )
         if report.startswith("Error:"):
             raise HTTPException(status_code=404, detail=report)
@@ -1068,7 +1075,8 @@ def rag_generate_pdf(request: GeneratePdfRequest):
         pdf_bytes = compile_pdf_with_rust(
             request.report_text,
             request.patient_metadata,
-            study_id=request.study_id
+            study_id=request.study_id,
+            for_patient=request.for_patient
         )
         
         if request.study_id and minio_client:

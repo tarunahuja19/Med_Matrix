@@ -100,11 +100,11 @@ def main():
     
     # 5 pathologies: Category 1 (Glioma), 2 (Stroke), 3 (MS), 4 (Hydrocephalus), 10 (Microbleeds)
     cases = [
-        {"name": "John Doe (Glioma)", "category_id": 1, "dob": "1975-03-12T00:00:00.000Z", "gender": "M", "filename": "glioma_kspace_228.npy"},
-        {"name": "Sarah Connor (Stroke)", "category_id": 2, "dob": "1965-11-20T00:00:00.000Z", "gender": "F", "filename": "stroke_kspace_228.npy"},
-        {"name": "Bruce Wayne (MS Lesions)", "category_id": 3, "dob": "1980-05-15T00:00:00.000Z", "gender": "M", "filename": "ms_kspace_228.npy"},
-        {"name": "Ellen Ripley (Hydrocephalus)", "category_id": 4, "dob": "1992-07-04T00:00:00.000Z", "gender": "F", "filename": "hydrocephalus_kspace_228.npy"},
-        {"name": "Tony Stark (Microbleeds)", "category_id": 10, "dob": "1970-04-29T00:00:00.000Z", "gender": "M", "filename": "microbleeds_kspace_228.npy"},
+        {"name": "John Doe (Glioma)", "category_id": 1, "dob": "1975-03-12T00:00:00.000Z", "gender": "M", "filename": "glioma_kspace_228.npy", "phone": "+919974202309"},
+        {"name": "Sarah Connor (Stroke)", "category_id": 2, "dob": "1965-11-20T00:00:00.000Z", "gender": "F", "filename": "stroke_kspace_228.npy", "phone": "+919974202309"},
+        {"name": "Bruce Wayne (MS Lesions)", "category_id": 3, "dob": "1980-05-15T00:00:00.000Z", "gender": "M", "filename": "ms_kspace_228.npy", "phone": "+919974202309"},
+        {"name": "Ellen Ripley (Hydrocephalus)", "category_id": 4, "dob": "1992-07-04T00:00:00.000Z", "gender": "F", "filename": "hydrocephalus_kspace_228.npy", "phone": "+919974202309"},
+        {"name": "Tony Stark (Microbleeds)", "category_id": 10, "dob": "1970-04-29T00:00:00.000Z", "gender": "M", "filename": "microbleeds_kspace_228.npy", "phone": "+919974202309"},
     ]
     
     for case in cases:
@@ -120,7 +120,8 @@ def main():
         patient_payload = {
             "name": case["name"],
             "dateOfBirth": case["dob"],
-            "gender": case["gender"]
+            "gender": case["gender"],
+            "phone": case["phone"]
         }
         print(f"Registering patient {case['name']} on backend...")
         req = urllib.request.Request(

@@ -105,7 +105,7 @@ def fetch_document_chunks(disease_name: str, redis_client) -> list:
     logger.error(f"Could not retrieve or ingest reference data for disease: {disease_name}")
     return []
 
-def generate_radiology_report(disease_name: str, patient_metadata: dict, llm_model: str = "gemini-3.5-flash") -> str:
+def generate_radiology_report(disease_name: str, patient_metadata: dict, llm_model: str = "gemini-3.5-flash", for_patient: bool = False) -> str:
     """
     Main query pipeline for the RAG agent.
     Checks cache, runs vector similarity search if needed, calls LLM, and formats placeholders.
@@ -135,7 +135,7 @@ def generate_radiology_report(disease_name: str, patient_metadata: dict, llm_mod
         current_date = datetime.now().strftime("%B %d, %Y")
         
     redis_client = get_redis_client()
-    cache_key = f"rad_report:{disease_clean}:{age_bucket}:{sex}"
+    cache_key = f"patient_report:{disease_clean}:{age_bucket}:{sex}" if for_patient else f"rad_report:{disease_clean}:{age_bucket}:{sex}"
     
     # 2. Cache Check
     cached_template = redis_client.get(cache_key)
@@ -180,7 +180,41 @@ def generate_radiology_report(disease_name: str, patient_metadata: dict, llm_mod
     top_chunks = [chunk for _, chunk in scored_chunks[:5]]
     
     # 4. Construct System Prompt & User Context
-    system_prompt = f"""You are an expert clinical radiologist assistant. Your task is to generate a standardized radiology report based on the provided reference medical context.
+    if for_patient:
+        system_prompt = f"""You are an empathetic, expert clinical assistant helping translate complex radiology reports into patient-friendly language.
+Your task is to generate a Patient-Friendly MRI Report based on the provided reference medical context.
+
+Please follow this structure. Do NOT deviate from this layout:
+---
+PATIENT-FRIENDLY MRI SUMMARY
+
+Dear {{name}},
+
+This is a simplified summary of your brain MRI scan performed on {{date}}.
+
+WHAT WAS FOUND:
+[Explain in simple, gentle, clear terms what disease/anomaly was detected ({disease_name}), using friendly and non-alarmist analogies or everyday language. Avoid complex medical jargon, or explain it immediately if you must use it.]
+
+EXPLANATION OF TECH:
+[Explain in simple terms how the scan was done and why this sequence was used.]
+
+DETAILED EXPLANATION:
+[Provide a clear, easy-to-understand breakdown of what the imaging showed based on the medical context, reassuring the patient where appropriate.]
+
+NEXT STEPS & RECOMMENDATIONS:
+[List clear, actionable advice: follow-up doctor consultations, rest, or standard next steps in plain English.]
+
+If you have any questions, please consult Dr. Tarun Ahuja, MD.
+---
+
+CRITICAL INSTRUCTIONS:
+1. You MUST output the placeholders '{{name}}' and '{{date}}' exactly as written in curly braces (with no spaces inside). Do NOT replace them with actual names or dates.
+2. The values for '{{age}}' and '{{sex}}' MUST be filled in with the patient's actual age (e.g. {age}) and sex (e.g. {sex.capitalize()}).
+3. Write in an empathetic, supportive, and clear tone. Make sure it is completely understandable to someone without any medical background.
+4. Output ONLY the report inside the '---' borders. Do not write any conversational preamble or postscript.
+"""
+    else:
+        system_prompt = f"""You are an expert clinical radiologist assistant. Your task is to generate a standardized radiology report based on the provided reference medical context.
 
 You MUST strictly adhere to the following format. Do NOT deviate from this layout.
 

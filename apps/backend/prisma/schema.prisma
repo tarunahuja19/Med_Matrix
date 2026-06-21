@@ -17,6 +17,7 @@ model Patient {
   name        String
   dateOfBirth DateTime
   gender      String
+  phone       String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   studies     Study[]
@@ -39,14 +40,15 @@ model Study {
 }
 
 model Report {
-  id          String    @id @default(uuid())
-  studyId     String
-  study       Study     @relation(fields: [studyId], references: [id])
-  findings    String?
-  impression  String?
-  status      String    @default("draft") // draft, final
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id                String    @id @default(uuid())
+  studyId           String
+  study             Study     @relation(fields: [studyId], references: [id])
+  findings          String?
+  impression        String?
+  patientImpression String?
+  status            String    @default("draft") // draft, final
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 }
 
 // ---------------------------------------------------------------------------

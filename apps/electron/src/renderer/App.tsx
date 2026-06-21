@@ -7,6 +7,7 @@ interface Patient {
   name: string
   dateOfBirth: string
   gender: string
+  phone?: string
 }
 
 interface Study {
@@ -26,6 +27,7 @@ interface Report {
   study: Study
   findings: string | null
   impression: string | null
+  patientImpression?: string | null
   status: string
   createdAt: string
 }
@@ -2085,13 +2087,15 @@ const renderFormattedReportText = (text: string | null) => {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
     if (inSkippingHeader) {
-      if (line === '---' || line === 'RADIOLOGY REPORT' || line === '') {
+      if (line === '---' || line === 'RADIOLOGY REPORT' || line === 'PATIENT-FRIENDLY MRI SUMMARY' || line === '') {
         continue;
       }
       if (line.toLowerCase().startsWith('patient:') || line.toLowerCase().startsWith('date:')) {
         continue;
       }
-      inSkippingHeader = false;
+      if (line.toLowerCase().startsWith('dear')) {
+        inSkippingHeader = false;
+      }
     }
     if (line === '---' && i >= lines.length - 2) {
       continue;
@@ -2105,8 +2109,12 @@ const renderFormattedReportText = (text: string | null) => {
       'TECHNIQUE',
       'FINDINGS',
       'IMPRESSION',
-      'RECOMMENDATION'
-    ].some(h => line.toUpperCase().startsWith(h));
+      'RECOMMENDATION',
+      'WHAT WAS FOUND:',
+      'EXPLANATION OF TECH:',
+      'DETAILED EXPLANATION:',
+      'NEXT STEPS & RECOMMENDATIONS:'
+    ].some(h => line.toUpperCase().startsWith(h.toUpperCase()));
 
     if (isSectionHeader) {
       elements.push(
@@ -2431,13 +2439,16 @@ export default function App() {
   const [newPatientName, setNewPatientName] = useState('')
   const [newPatientDOB, setNewPatientDOB] = useState('')
   const [newPatientGender, setNewPatientGender] = useState('M')
+  const [newPatientPhone, setNewPatientPhone] = useState('')
   const [patientSaving, setPatientSaving] = useState(false)
 
   // archive / reports selection
   const [selectedStudy, setSelectedStudy] = useState<Study | null>(null)
   const [selectedReport, setSelectedReport] = useState<Report | null>(null)
+  const [reportSubTab, setReportSubTab] = useState<'radiologist' | 'patient'>('radiologist')
   const [isEditing, setIsEditing] = useState(false)
   const [editImpression, setEditImpression] = useState('')
+  const [editPatientImpression, setEditPatientImpression] = useState('')
 
   const [selectedProgressionMonth, setSelectedProgressionMonth] = useState<number>(0)
   const [lockedProgressionMonth, setLockedProgressionMonth] = useState<number | null>(null)
@@ -2452,6 +2463,8 @@ export default function App() {
   useEffect(() => {
     if (selectedReport) {
       setEditImpression(selectedReport.impression || '')
+      setEditPatientImpression(selectedReport.patientImpression || '')
+      setReportSubTab('radiologist')
       setIsEditing(false)
     }
   }, [selectedReport])
@@ -2475,6 +2488,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           impression: editImpression,
+          patientImpression: editPatientImpression,
           status: 'final'
         })
       })
@@ -2496,11 +2510,43 @@ export default function App() {
     if (!selectedReport) return
     const patientName = selectedReport.study?.patient?.name.replace(/\s+/g, '_') || 'patient'
     const link = document.createElement('a')
-    link.href = `${API}/reports/${selectedReport.id}/pdf`
-    link.setAttribute('download', `radiology_report_${patientName}_${selectedReport.id.substring(0, 8)}.pdf`)
+    const forPatient = reportSubTab === 'patient'
+    link.href = `${API}/reports/${selectedReport.id}/pdf${forPatient ? '?forPatient=true' : ''}`
+    link.setAttribute('download', `${forPatient ? 'patient_report' : 'radiology_report'}_${patientName}_${selectedReport.id.substring(0, 8)}.pdf`)
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
+  }
+
+  const handleSendWhatsApp = async () => {
+    if (!selectedReport) return
+    const patient = selectedReport.study?.patient
+    if (!patient) {
+      addLog('ERROR: Patient record not found.')
+      return
+    }
+    const phoneNum = patient.phone || '+919974202309'
+    if (!patient.phone) {
+      addLog(`[WhatsApp] Warning: Patient phone not registered. Falling back to default test number: ${phoneNum}`)
+    }
+
+    try {
+      const response = await fetch(`${API}/reports/${selectedReport.id}/send-whatsapp`, {
+        method: 'POST',
+      })
+      const data = await response.json()
+      if (response.ok) {
+        addLog(`[WhatsApp] Sending Patient PDF report automatically to ${phoneNum}...`)
+        addLog(`[WhatsApp] PDF file compiled: ${data.filename}`)
+        addLog(`[WhatsApp] SUCCESS: Actual PDF report delivered automatically via API!`)
+      } else {
+        addLog(`[WhatsApp] Failed to send: ${data.error}`)
+        alert(`Failed to send WhatsApp: ${data.error}`)
+      }
+    } catch (err: any) {
+      addLog(`[WhatsApp] Error: ${err.message}`)
+      alert(`WhatsApp error: ${err.message}`)
+    }
   }
 
   // IPC / browser detection
@@ -2711,6 +2757,7 @@ export default function App() {
           name: newPatientName,
           dateOfBirth: new Date(newPatientDOB).toISOString(),
           gender: newPatientGender,
+          phone: newPatientPhone || undefined,
         }),
       })
       const d = await r.json()
@@ -2719,6 +2766,7 @@ export default function App() {
         setNewPatientName('')
         setNewPatientDOB('')
         setNewPatientGender('M')
+        setNewPatientPhone('')
         await fetchPatients()
         setSelectedPatientId(d.id)
       } else {
@@ -3278,6 +3326,16 @@ export default function App() {
                     <option value="O">Other</option>
                   </select>
                 </div>
+                <div>
+                  <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text-dim)', textTransform: 'uppercase', marginBottom: '4px' }}>WhatsApp Number</div>
+                  <input
+                    type="text"
+                    placeholder="e.g. +1234567890"
+                    value={newPatientPhone}
+                    onChange={(e) => setNewPatientPhone(e.target.value)}
+                    style={{ width: '100%', padding: '6px 8px', fontFamily: 'var(--font-mono)', fontSize: '12px', background: '#e4e7e9', border: '1px solid var(--color-panel-border)', color: 'var(--color-text-main)' }}
+                  />
+                </div>
                 <button
                   onClick={handleCreatePatient}
                   disabled={patientSaving || !newPatientName || !newPatientDOB}
@@ -3309,6 +3367,7 @@ export default function App() {
                         <th>Name</th>
                         <th>Date of Birth</th>
                         <th>Gender</th>
+                        <th>WhatsApp/Phone</th>
                         <th>Studies</th>
                       </tr>
                     </thead>
@@ -3333,6 +3392,7 @@ export default function App() {
                             <td style={{ fontWeight: 600 }}>{p.name}</td>
                             <td>{new Date(p.dateOfBirth).toLocaleDateString()}</td>
                             <td style={{ fontFamily: 'var(--font-mono)' }}>{p.gender}</td>
+                            <td style={{ fontFamily: 'var(--font-mono)' }}>{p.phone || '—'}</td>
                             <td>
                               <span style={{ fontFamily: 'var(--font-mono)', color: studyCount > 0 ? 'var(--color-accent-blue)' : 'var(--color-text-dim)' }}>
                                 {studyCount} {studyCount === 1 ? 'study' : 'studies'}
@@ -3428,6 +3488,7 @@ export default function App() {
                             <button
                               onClick={() => {
                                 setEditImpression(selectedReport.impression || '')
+                                setEditPatientImpression(selectedReport.patientImpression || '')
                                 setIsEditing(false)
                               }}
                               className="clinical-btn"
@@ -3445,6 +3506,15 @@ export default function App() {
                             >
                               ✏️ Edit Report
                             </button>
+                            {reportSubTab === 'patient' && (
+                              <button
+                                onClick={handleSendWhatsApp}
+                                className="clinical-btn clinical-btn-primary"
+                                style={{ padding: '4px 12px', fontSize: '11px', background: '#25D366', borderColor: '#128C7E', color: '#fff' }}
+                              >
+                                🟢 Send via WhatsApp
+                              </button>
+                            )}
                             <button
                               onClick={handleDownloadPdf}
                               className="clinical-btn"
@@ -3455,10 +3525,11 @@ export default function App() {
                           </>
                         )}
                       </div>
+
                       {/* Header */}
                       <div style={{ background: '#d1dadf', border: '1px solid var(--color-panel-border)', padding: '10px 12px' }}>
                         <div style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--color-accent-blue)', marginBottom: '6px' }}>
-                          Radiological AI Report
+                          {reportSubTab === 'radiologist' ? 'Radiological AI Report' : 'Patient-Friendly MRI Summary'}
                         </div>
                         <div className="detail-grid" style={{ marginBottom: 0 }}>
                           <span className="detail-label">Patient:</span>
@@ -3507,8 +3578,48 @@ export default function App() {
                             )}
                           </div>
 
+                          {/* Report Sub-Tabs: Radiologist vs Patient */}
+                          <div style={{ display: 'flex', borderBottom: '1px solid var(--color-panel-border)', marginBottom: '8px', marginTop: '12px' }}>
+                            <button
+                              onClick={() => {
+                                setReportSubTab('radiologist')
+                                setIsEditing(false)
+                              }}
+                              style={{
+                                padding: '6px 16px',
+                                background: reportSubTab === 'radiologist' ? '#dce8f0' : 'transparent',
+                                color: reportSubTab === 'radiologist' ? 'var(--color-accent-blue)' : 'var(--color-text-dim)',
+                                border: 'none',
+                                borderBottom: reportSubTab === 'radiologist' ? '2px solid var(--color-accent-blue)' : '2px solid transparent',
+                                fontWeight: 'bold',
+                                cursor: 'pointer',
+                                fontSize: '11px'
+                              }}
+                            >
+                              📋 Radiologist Report
+                            </button>
+                            <button
+                              onClick={() => {
+                                setReportSubTab('patient')
+                                setIsEditing(false)
+                              }}
+                              style={{
+                                padding: '6px 16px',
+                                background: reportSubTab === 'patient' ? '#dce8f0' : 'transparent',
+                                color: reportSubTab === 'patient' ? 'var(--color-accent-blue)' : 'var(--color-text-dim)',
+                                border: 'none',
+                                borderBottom: reportSubTab === 'patient' ? '2px solid var(--color-accent-blue)' : '2px solid transparent',
+                                fontWeight: 'bold',
+                                cursor: 'pointer',
+                                fontSize: '11px'
+                              }}
+                            >
+                              👤 Patient Report
+                            </button>
+                          </div>
+
                           {/* Standardized Radiology Report Sheet (Diagnostic layout) */}
-                          {(selectedReport.impression !== null || isEditing) && (
+                          {((reportSubTab === 'radiologist' ? selectedReport.impression !== null : selectedReport.patientImpression !== null) || isEditing) ? (
                             <div style={{
                               background: '#ffffff',
                               color: '#2d3748',
@@ -3589,15 +3700,23 @@ export default function App() {
                                 borderBottom: '1px solid #cbd5e0',
                                 paddingBottom: '8px',
                               }}>
-                                MAGNETIC RESONANCE IMAGING (MRI) BRAIN REPORT
+                                {reportSubTab === 'radiologist' 
+                                  ? 'MAGNETIC RESONANCE IMAGING (MRI) BRAIN REPORT' 
+                                  : 'MAGNETIC RESONANCE IMAGING (MRI) BRAIN REPORT (PATIENT SUMMARY)'}
                               </div>
 
                               {/* Report Text Content / Editor */}
                               <div style={{ marginBottom: '30px' }}>
                                 {isEditing ? (
                                   <textarea
-                                    value={editImpression}
-                                    onChange={(e) => setEditImpression(e.target.value)}
+                                    value={reportSubTab === 'radiologist' ? editImpression : editPatientImpression}
+                                    onChange={(e) => {
+                                      if (reportSubTab === 'radiologist') {
+                                        setEditImpression(e.target.value)
+                                      } else {
+                                        setEditPatientImpression(e.target.value)
+                                      }
+                                    }}
                                     style={{
                                       width: '100%',
                                       height: '400px',
@@ -3615,7 +3734,7 @@ export default function App() {
                                   />
                                 ) : (
                                   <div style={{ color: '#2d3748', fontSize: '13px', fontFamily: 'var(--font-sans)', lineHeight: '1.6' }}>
-                                    {renderFormattedReportText(selectedReport.impression)}
+                                    {renderFormattedReportText(reportSubTab === 'radiologist' ? selectedReport.impression : selectedReport.patientImpression)}
                                   </div>
                                 )}
                               </div>
@@ -3640,7 +3759,11 @@ export default function App() {
                                 </div>
                               </div>
                             </div>
-                          )}
+                          ) : reportSubTab === 'patient' ? (
+                            <div style={{ padding: '24px', background: '#ffffff', border: '1px solid #cbd5e0', borderRadius: '4px', textAlign: 'center', color: 'var(--color-text-dim)', fontStyle: 'italic', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)' }}>
+                              No patient summary generated yet. Click "✏️ Edit Report" above to draft one, or run backfill to generate it.
+                            </div>
+                          ) : null}
 
                           {selectedReport.study?.status === 'complete' && (
                             <div style={{ border: '1px solid var(--color-panel-border)', padding: '12px', background: '#f5f7f8' }}>

@@ -84,6 +84,9 @@ services:
       MINIO_SECURE: "false"
       AI_SERVICE_URL: http://ai-service:8000
       PORT: "3000"
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN}
+      TWILIO_SENDER_NUMBER: ${TWILIO_SENDER_NUMBER}
     volumes:
       - ./apps/backend/src:/app/apps/backend/src   # hot-reload: live source mount
     depends_on:

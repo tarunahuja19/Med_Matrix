@@ -80,6 +80,7 @@ async function processStudy(job: Job<StudyJobData>): Promise<void> {
   const patient = study?.patient
 
   let generatedReport: string | null = null
+  let generatedPatientReport: string | null = null
   if (patient && inferenceResult.predictedPathology) {
     try {
       const dob = new Date(patient.dateOfBirth)
@@ -90,18 +91,27 @@ async function processStudy(job: Job<StudyJobData>): Promise<void> {
         age--
       }
 
+      const patientMetadata = {
+        name: patient.name,
+        age: age,
+        gender: patient.gender,
+        dateOfBirth: patient.dateOfBirth.toISOString(),
+        symptoms: inferenceResult.predictedPathology === 'Normal'
+          ? 'Routine check'
+          : `Suspected ${inferenceResult.predictedPathology.replace(/_/g, ' ')}`,
+        studyDate: study.studyDate.toISOString(),
+      }
+
       generatedReport = await aiClient.generateRagReport(
         inferenceResult.predictedPathology,
-        {
-          name: patient.name,
-          age: age,
-          gender: patient.gender,
-          dateOfBirth: patient.dateOfBirth.toISOString(),
-          symptoms: inferenceResult.predictedPathology === 'Normal'
-            ? 'Routine check'
-            : `Suspected ${inferenceResult.predictedPathology.replace(/_/g, ' ')}`,
-          studyDate: study.studyDate.toISOString(),
-        }
+        patientMetadata,
+        false
+      )
+
+      generatedPatientReport = await aiClient.generateRagReport(
+        inferenceResult.predictedPathology,
+        patientMetadata,
+        true
       )
     } catch (err: any) {
       console.error(`[worker] Failed to generate RAG report: ${err.message}`)
@@ -113,6 +123,7 @@ async function processStudy(job: Job<StudyJobData>): Promise<void> {
       studyId,
       findings: findingsSummary,
       impression: generatedReport,
+      patientImpression: generatedPatientReport,
       status: 'draft',
     },
   })

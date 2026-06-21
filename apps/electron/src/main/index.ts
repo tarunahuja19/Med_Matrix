@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, clipboard } from 'electron'
 import path from 'path'
 import fs from 'fs'
 
@@ -66,6 +66,35 @@ ipcMain.handle('study:upload', async (_event, filePath: string, meta?: { patient
       return { success: false, error: data.error || 'Upload failed', details: data.details }
     }
     return { success: true, data }
+  } catch (err: any) {
+    return { success: false, error: err.message }
+  }
+})
+
+// IPC: copy file from URL to local clipboard as native file object
+ipcMain.handle('clipboard:copyFile', async (_event, url: string, fileName: string) => {
+  try {
+    const res = await fetch(url)
+    if (!res.ok) throw new Error(`Failed to fetch file: ${res.statusText}`)
+    const arrayBuffer = await res.arrayBuffer()
+    const buffer = Buffer.from(arrayBuffer)
+    
+    const tempPath = path.join(app.getPath('temp'), fileName)
+    fs.writeFileSync(tempPath, buffer)
+    
+    if (process.platform === 'win32') {
+      const clipboardBuffer = Buffer.concat([
+        Buffer.from(tempPath, 'ucs-2'),
+        Buffer.from([0, 0])
+      ])
+      clipboard.writeBuffer('FileNameW', clipboardBuffer)
+    } else if (process.platform === 'darwin') {
+      clipboard.writeBuffer('public.file-url', Buffer.from(`file://${tempPath}`))
+    } else {
+      clipboard.writeText(tempPath)
+    }
+    
+    return { success: true, filePath: tempPath }
   } catch (err: any) {
     return { success: false, error: err.message }
   }

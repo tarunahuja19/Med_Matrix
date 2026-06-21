@@ -214,13 +214,15 @@ export class AIServiceClient {
       dateOfBirth: string
       symptoms?: string
       studyDate?: string
-    }
+    },
+    forPatient?: boolean
   ): Promise<string | null> {
     try {
       const res = await this.http.post<{ status: string; report: string }>('/rag/query', {
         disease_name: diseaseName,
         patient_metadata: patientMetadata,
         llm_model: 'gemini-3.5-flash',
+        for_patient: forPatient ?? false,
       })
       if (res.data && res.data.status === 'success') {
         return res.data.report
