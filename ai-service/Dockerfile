@@ -1,5 +1,5 @@
 # Stage 1: Build Rust MRI reconstruction binary
-FROM rust:1.85-slim as rust-builder
+FROM rust:slim as rust-builder
 WORKDIR /build
 
 # Copy Cargo manifests for dependency caching
