@@ -181,10 +181,13 @@
           await nv.removeVolume(nv.volumes[1]);
         }
 
-        // Load the patient volume with a name hint so Niivue knows its NIfTI
-        console.log('[AutoLoad] Loading volume into Niivue...');
-        await nv.loadVolumes([{ url: url, name: 'patient_volume.nii' }]);
-        console.log('[AutoLoad] Volume loaded successfully. Total volumes:', nv.volumes.length);
+        // Load t1_crop.nii.gz as base, and patient_volume.nii as overlay
+        console.log('[AutoLoad] Loading volumes into Niivue...');
+        await nv.loadVolumes([
+          { url: 't1_crop.nii.gz', name: 't1_crop.nii.gz' },
+          { url: url, name: 'patient_volume.nii' }
+        ]);
+        console.log('[AutoLoad] Volumes loaded successfully. Total volumes:', nv.volumes.length);
 
         // Enable Create Mesh button so the user CAN create a mesh manually if desired
         const createMeshBtn = document.getElementById('createMeshBtn');

@@ -174,7 +174,8 @@ def reconstruct(request: ReconstructRequest):
         # 7. Upload Reconstructed image to 'reconstructed' bucket in MinIO
         try:
             logger.info(f"Saving and uploading reconstructed image to 'reconstructed' bucket with key {request.reconstructed_key}...")
-            np.save(local_reconstructed_path, denoised)
+            denoised_resized = resize_volume_to_256(denoised)
+            np.save(local_reconstructed_path, denoised_resized)
             
             minio_client.fput_object(
                 bucket_name="reconstructed",
@@ -213,6 +214,42 @@ PATHOLOGY_CLASSES = [
 ]
 
 _PATHOLOGY_MODEL = None
+
+def resize_volume_to_256(volume: np.ndarray) -> np.ndarray:
+    """
+    Resizes a volume or image to [..., 256, 256] using bilinear interpolation in PyTorch.
+    Works for 2D [H, W], 3D [slices, H, W], and 4D [time, slices, H, W] arrays.
+    """
+    orig_shape = volume.shape
+    if len(orig_shape) < 2:
+        return volume
+        
+    h, w = orig_shape[-2], orig_shape[-1]
+    if h == 256 and w == 256:
+        return volume
+
+    # Reshape to 3D: [N, H, W] where N is the product of all outer dimensions
+    flat_outer = int(np.prod(orig_shape[:-2])) if len(orig_shape) > 2 else 1
+    reshaped = volume.reshape((flat_outer, h, w))
+    
+    # Convert numpy to torch tensor of shape [N, 1, H, W] for 2D interpolation
+    tensor = torch.from_numpy(reshaped.astype(np.float32)).unsqueeze(1)
+    
+    # Perform bilinear interpolation
+    resized_tensor = torch.nn.functional.interpolate(
+        tensor,
+        size=(256, 256),
+        mode='bilinear',
+        align_corners=False
+    )
+    
+    # Convert back to numpy, squeeze, and reshape to the original outer dimensions
+    resized_flat = resized_tensor.squeeze(1).numpy().astype(volume.dtype)
+    if len(orig_shape) == 2:
+        return resized_flat[0]
+    else:
+        return resized_flat.reshape(orig_shape[:-2] + (256, 256))
+
 
 def compute_kspace_gradcam(model, x_final, target_class_idx):
     """
@@ -553,7 +590,8 @@ def predict(request: PredictRequest):
                 artifact_report = detect_artifacts(artifact_img)
 
                 # Save denoised/motion corrected version
-                np.save(local_reconstructed_path, denoised)
+                denoised_resized = resize_volume_to_256(denoised)
+                np.save(local_reconstructed_path, denoised_resized)
                 minio_client.fput_object(
                     bucket_name="reconstructed",
                     object_name=reconstructed_key,
@@ -565,7 +603,8 @@ def predict(request: PredictRequest):
                 artifact_report = {"error": str(e)}
                 # Fallback to saving base reconstruction
                 try:
-                    np.save(local_reconstructed_path, reconstructed)
+                    reconstructed_resized = resize_volume_to_256(reconstructed)
+                    np.save(local_reconstructed_path, reconstructed_resized)
                     minio_client.fput_object(
                         bucket_name="reconstructed",
                         object_name=reconstructed_key,
@@ -578,7 +617,8 @@ def predict(request: PredictRequest):
             logger.info("[predict] Clean scan — uploading base reconstruction directly...")
             try:
                 # Save clean base reconstruction directly (skip motion correction and denoise to save compute)
-                np.save(local_reconstructed_path, reconstructed)
+                reconstructed_resized = resize_volume_to_256(reconstructed)
+                np.save(local_reconstructed_path, reconstructed_resized)
                 minio_client.fput_object(
                     bucket_name="reconstructed",
                     object_name=reconstructed_key,
@@ -731,7 +771,8 @@ def predict(request: PredictRequest):
                 if reconstructed_gradcam_heatmap is not None:
                     reconstructed_gradcam_key = f"{request.study_id}/reconstructed_gradcam.npy"
                     local_reconstructed_gradcam_path = os.path.join(tmpdir, "reconstructed_gradcam.npy")
-                    np.save(local_reconstructed_gradcam_path, reconstructed_gradcam_heatmap)
+                    reconstructed_gradcam_resized = resize_volume_to_256(reconstructed_gradcam_heatmap)
+                    np.save(local_reconstructed_gradcam_path, reconstructed_gradcam_resized)
                     
                     minio_client.fput_object(
                         bucket_name="reconstructed",

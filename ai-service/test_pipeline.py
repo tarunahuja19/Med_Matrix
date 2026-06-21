@@ -55,7 +55,7 @@ def test_reconstruct_endpoint_integration():
             assert object_name == "output_image_key.npy"
             # Verify file exists and is readable as a numpy array
             data = np.load(file_path)
-            assert data.shape == (slices, height, width)
+            assert data.shape == (slices, 256, 256)
             uploaded_files[object_name] = data
 
         # Apply mocks to the main.minio_client
@@ -198,4 +198,4 @@ def test_predict_endpoint_with_kspace_explainability():
         # Verify arrays dimensions
         assert uploaded_files["test-predict-study-123/kspace_gradcam.npy"].shape == (8, 128, 128)
         assert uploaded_files["test-predict-study-123/kspace_log_mag.npy"].shape == (8, 128, 128)
-        assert uploaded_files["test-predict-study-123/reconstructed_gradcam.npy"].shape == (8, 128, 128)
+        assert uploaded_files["test-predict-study-123/reconstructed_gradcam.npy"].shape == (8, 256, 256)

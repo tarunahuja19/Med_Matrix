@@ -150,7 +150,6 @@ function parseNpy(arrayBuffer: ArrayBuffer) {
 
   return { shape, data }
 }
-
 function convertNpyToNifti(parsedNpy: { shape: number[]; data: any }): ArrayBuffer {
   const [slices, height, width] = parsedNpy.shape
   const numVoxels = slices * height * width
@@ -180,7 +179,7 @@ function convertNpyToNifti(parsedNpy: { shape: number[]; data: any }): ArrayBuff
   // pixdim
   view.setFloat32(76, 1.0, true)
   view.setFloat32(80, 1.0, true)
-  view.setFloat32(84, 1.0, true)
+  view.setFloat32(84, slices > 0 ? height / slices : 1.0, true)
   view.setFloat32(88, 1.0, true)
 
   // vox_offset
@@ -198,7 +197,6 @@ function convertNpyToNifti(parsedNpy: { shape: number[]; data: any }): ArrayBuff
 
   return combined.buffer
 }
-
 
 function renderSlice(
   canvas: HTMLCanvasElement, 
@@ -2680,13 +2678,22 @@ export default function App() {
                 <span>Interactive 3D Brain Reconstruction (brain2print)</span>
                 <span style={{ fontFamily: 'var(--font-mono)' }}>[3D-MESH-GENERATOR]</span>
               </div>
-              <div className="panel-body" style={{ padding: 0, height: '100%', overflow: 'hidden' }}>
-                <iframe
-                  ref={brain3dIframeRef}
-                  src="./brain2print/index.html"
-                  style={{ width: '100%', height: '100%', border: 'none' }}
-                  title="brain2print 3D Brain Model"
-                />
+              <div className="panel-body" style={{ padding: 0, height: '100%', overflow: 'hidden', background: brain3dSelectedPatientId ? '#0a0d10' : 'var(--color-panel-bg)' }}>
+                {brain3dSelectedPatientId ? (
+                  <iframe
+                    ref={brain3dIframeRef}
+                    src="./brain2print/index.html"
+                    style={{ width: '100%', height: '100%', border: 'none' }}
+                    title="brain2print 3D Brain Model"
+                  />
+                ) : (
+                  <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--color-accent-blue)', fontFamily: 'var(--font-mono)', fontSize: '12px', gap: '10px', textAlign: 'center', padding: '40px' }}>
+                    <div style={{ fontWeight: 'bold' }}>NO ACTIVE PATIENT SELECTION</div>
+                    <div style={{ color: 'var(--color-text-dim)', fontSize: '11px', maxWidth: '300px', lineHeight: '1.4' }}>
+                      Select a patient from the explorer index on the left to initialize the 3D reconstruction and overlay their scan volume.
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </>
