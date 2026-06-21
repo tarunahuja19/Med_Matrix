@@ -529,3 +529,143 @@ def predict(request: PredictRequest):
             pathology_probabilities=pathology_probs,
             message=reason,
         )
+
+# ── RAG Reporting Agent Endpoints ────────────────────────────────────────
+
+class RagQueryRequest(BaseModel):
+    disease_name: str
+    patient_metadata: dict
+    llm_model: str = "gemini-3.5-flash"
+
+class GeneratePdfRequest(BaseModel):
+    report_text: str
+    patient_metadata: dict = {}
+    study_id: str | None = None
+
+def compile_pdf_with_rust(report_text: str, patient_metadata: dict) -> bytes:
+    import subprocess
+    import tempfile
+    import os
+
+    binary_path = None
+    possible_paths = [
+        "/usr/local/bin/report_pdf",
+        "/app/report_pdf",
+        "./report_pdf",
+        os.path.join(os.path.dirname(__file__), "report_pdf"),
+    ]
+    for p in possible_paths:
+        if os.path.exists(p) and os.access(p, os.X_OK):
+            binary_path = p
+            break
+            
+    if not binary_path:
+        raise FileNotFoundError("report_pdf Rust binary not found or not executable in search paths.")
+
+    with tempfile.NamedTemporaryFile(mode='w+', suffix='.txt', delete=False) as f_in:
+        f_in.write(report_text)
+        f_in_name = f_in.name
+
+    with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as f_out:
+        f_out_name = f_out.name
+
+    try:
+        cmd = [binary_path, "--input", f_in_name, "--output", f_out_name]
+        
+        if "name" in patient_metadata:
+            cmd.extend(["--name", str(patient_metadata["name"])])
+        if "age" in patient_metadata:
+            cmd.extend(["--age", str(patient_metadata["age"])])
+        if "sex" in patient_metadata:
+            cmd.extend(["--sex", str(patient_metadata["sex"])])
+        if "physician" in patient_metadata:
+            cmd.extend(["--physician", str(patient_metadata["physician"])])
+        if "report_id" in patient_metadata:
+            cmd.extend(["--id", str(patient_metadata["report_id"])])
+        if "date" in patient_metadata:
+            cmd.extend(["--date", str(patient_metadata["date"])])
+
+        logger.info(f"Invoking Rust PDF generator: {' '.join(cmd)}")
+        res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        logger.info(f"Rust compiler stdout: {res.stdout}")
+        
+        with open(f_out_name, 'rb') as f_pdf:
+            pdf_bytes = f_pdf.read()
+            
+        return pdf_bytes
+    finally:
+        try:
+            os.remove(f_in_name)
+            os.remove(f_out_name)
+        except Exception:
+            pass
+
+@app.post("/rag/ingest")
+def rag_ingest(data_dir: str = "/app/data"):
+    """Ingests all Markdown reference documents from the data directory into Upstash Redis."""
+    from rag_agent.ingest import run_full_ingestion
+    try:
+        if not os.path.exists(data_dir):
+            raise HTTPException(status_code=404, detail=f"Data directory '{data_dir}' not found.")
+        
+        success_count = run_full_ingestion(data_dir)
+        return {
+            "status": "success",
+            "message": f"Successfully ingested {success_count} files into Upstash Redis."
+        }
+    except Exception as e:
+        logger.error(f"Ingestion failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/rag/query")
+def rag_query(request: RagQueryRequest):
+    """Queries RAG and generates a radiology report for a patient."""
+    from rag_agent.query import generate_radiology_report
+    try:
+        report = generate_radiology_report(
+            disease_name=request.disease_name,
+            patient_metadata=request.patient_metadata,
+            llm_model=request.llm_model
+        )
+        if report.startswith("Error:"):
+            raise HTTPException(status_code=404, detail=report)
+        return {
+            "status": "success",
+            "report": report
+        }
+    except Exception as e:
+        logger.error(f"RAG query generation failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/rag/generate-pdf")
+def rag_generate_pdf(request: GeneratePdfRequest):
+    """Generates a styled radiology report PDF using the compiled Rust binary."""
+    from fastapi.responses import Response
+    import io
+    try:
+        pdf_bytes = compile_pdf_with_rust(request.report_text, request.patient_metadata)
+        
+        if request.study_id and minio_client:
+            try:
+                object_name = f"{request.study_id}/report.pdf"
+                logger.info(f"Uploading PDF report to 'reports' bucket with key {object_name}...")
+                minio_client.put_object(
+                    bucket_name="reports",
+                    object_name=object_name,
+                    data=io.BytesIO(pdf_bytes),
+                    length=len(pdf_bytes),
+                    content_type="application/pdf"
+                )
+            except Exception as upload_err:
+                logger.error(f"Failed to upload PDF report to MinIO: {upload_err}")
+        
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": "attachment; filename=radiology_report.pdf"}
+        )
+    except Exception as e:
+        logger.error(f"PDF generation failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+

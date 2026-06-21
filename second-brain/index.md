@@ -10,6 +10,7 @@ Use these links to navigate through the persistent memories and attempt logs:
 ### 🏛️ Core Memories
 *   [memories/architecture.md](memories/architecture.md) — Main system architecture, technology stack, data flow, and database schema mappings.
 *   [memories/inference.md](memories/inference.md) — Fused S4-CNN model details, C++ ONNX Runtime inference engine, benchmarks, and test suite.
+*   [memories/radiology_agent_rag.md](memories/radiology_agent_rag.md) — RAG-based Radiology Reporting Agent architecture, database schema, and pipelines.
 
 ### 🧪 Task & Attempt Logs
 *   [attempts/template.md](attempts/template.md) — Standard markdown template for creating new attempt logs.
@@ -30,8 +31,8 @@ This directory links to key files in the MedMatrix workspace, sorted by monorepo
 *   [.env](file:///home/jemin/Projects/Med_Matrix/.env) — Environment variables.
 
 ### 🧠 Trained Models & Training Artifacts
-*   [fused_model_128.onnx](file:///home/jemin/Projects/Med_Matrix/fused_model_128.onnx) — Production ONNX model (128-res, 8 slices × 16 coils, ~281k params, 88.28% peak accuracy).
-*   [fused_model_128.pt](file:///home/jemin/Projects/Med_Matrix/fused_model_128.pt) — PyTorch checkpoint for the production model.
+*   [fused_model_128.onnx](file:///home/jemin/Projects/Med_Matrix/ai-service/fused_model_128.onnx) — Production ONNX model (128-res, 8 slices × 16 coils, ~281k params, 88.28% peak accuracy).
+*   [fused_model_128.pt](file:///home/jemin/Projects/Med_Matrix/ai-service/fused_model_128.pt) — PyTorch checkpoint for the production model.
 *   [training_progress.log](file:///home/jemin/Projects/Med_Matrix/training_progress.log) — Live training log synced from Kaggle remote GPU server.
 *   [PhantomNet_multiclass600.ipynb](file:///home/jemin/Projects/Med_Matrix/PhantomNet_multiclass600.ipynb) — Kaggle notebook for remote GPU training (600 patients).
 

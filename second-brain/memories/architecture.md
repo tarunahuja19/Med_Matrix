@@ -13,9 +13,9 @@ Med_Matrix/
 ├── 🐳 docker-compose.yml        <- Orchestrates Postgres, Redis, MinIO, AI Service, and Backend
 ├── 📓 PhantomNet_multiclass600.ipynb  <- Kaggle notebook for remote GPU training
 ├── 📊 training_progress.log     <- Live training progress log (synced from remote)
-├── 🧠 fused_model_128.onnx      <- Production ONNX model (128-res, 88.28% val acc)
-├── 🧠 fused_model_128.pt        <- PyTorch checkpoint (128-res)
 ├── 🤖 ai-service/                <- Python-based AI microservice (FastAPI + PyTorch)
+│   ├── fused_model_128.onnx     <- Production ONNX model (128-res, 88.28% val acc)
+│   ├── fused_model_128.pt       <- PyTorch checkpoint (128-res)
 │   ├── main.py                  <- FastAPI application entrypoint with /reconstruct and /predict
 │   ├── models.py                <- Pydantic schemas for request/response validation
 │   ├── fused_model.py           <- Hybrid S4-CNN Fused Volumetric Classifier (complex-valued)
