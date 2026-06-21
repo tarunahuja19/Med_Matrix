@@ -132,3 +132,70 @@ def test_reconstruct_endpoint_minio_error():
     # The endpoint should return 404 Not Found
     assert response.status_code == 404
     assert "Failed to retrieve K-space file" in response.json()["detail"]
+
+
+def test_predict_endpoint_with_kspace_explainability():
+    # 1. Generate realistic raw kspace data
+    slices, coils, height, width = 4, 12, 64, 64
+    kspace_data = generate_synthetic_kspace(
+        slices=slices,
+        coils=coils,
+        height=height,
+        width=width,
+        noise_level=0.05,
+        artifact="ghosting"
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        temp_kspace_file = os.path.join(tmpdir, "mock_kspace.npy")
+        np.save(temp_kspace_file, kspace_data)
+
+        # Mock fget_object
+        def mock_fget_object(bucket_name, object_name, file_path):
+            import shutil
+            shutil.copy(temp_kspace_file, file_path)
+
+        # Mock fput_object to capture uploaded files
+        uploaded_files = {}
+        def mock_fput_object(bucket_name, object_name, file_path):
+            uploaded_files[object_name] = np.load(file_path)
+
+        main.minio_client.fget_object = mock_fget_object
+        main.minio_client.fput_object = mock_fput_object
+
+        # Prepare request payload for /predict
+        payload = {
+            "study_id": "test-predict-study-123",
+            "kspace_key": "input_kspace_key.npy",
+            "anomaly_threshold": 0.5,
+            "phase_correction": True,
+            "denoise_method": "nlm"
+        }
+
+        # Make the /predict request
+        response = client.post("/predict", json=payload)
+
+        # Assertions
+        assert response.status_code == 200
+        json_data = response.json()
+        assert json_data["status"] == "success"
+        
+        # Check pathology predictions
+        assert "predicted_pathology" in json_data
+        assert "pathology_confidence" in json_data
+        assert "pathology_probabilities" in json_data
+        
+        # Check explainability keys
+        assert json_data["kspace_gradcam_key"] == "test-predict-study-123/kspace_gradcam.npy"
+        assert json_data["kspace_log_mag_key"] == "test-predict-study-123/kspace_log_mag.npy"
+        assert json_data["reconstructed_gradcam_key"] == "test-predict-study-123/reconstructed_gradcam.npy"
+        
+        # Verify the files were uploaded to MinIO correctly
+        assert "test-predict-study-123/kspace_gradcam.npy" in uploaded_files
+        assert "test-predict-study-123/kspace_log_mag.npy" in uploaded_files
+        assert "test-predict-study-123/reconstructed_gradcam.npy" in uploaded_files
+        
+        # Verify arrays dimensions
+        assert uploaded_files["test-predict-study-123/kspace_gradcam.npy"].shape == (8, 128, 128)
+        assert uploaded_files["test-predict-study-123/kspace_log_mag.npy"].shape == (8, 128, 128)
+        assert uploaded_files["test-predict-study-123/reconstructed_gradcam.npy"].shape == (8, 128, 128)

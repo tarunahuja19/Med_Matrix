@@ -73,10 +73,11 @@ body {
   border-bottom: 2px solid var(--color-panel-border);
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 18px;
   padding: 0 16px;
   font-family: var(--font-mono);
   font-weight: bold;
+  font-size: 11px;
 }
 
 .syngo-workspace {

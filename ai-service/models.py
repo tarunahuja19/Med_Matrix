@@ -85,4 +85,7 @@ class PredictResponse(BaseModel):
     predicted_pathology: Optional[str] = Field(default=None, description="Predicted pathology class name")
     pathology_confidence: Optional[float] = Field(default=None, description="Softmax confidence score for pathology prediction")
     pathology_probabilities: Optional[dict] = Field(default=None, description="Full map of pathology class probabilities")
+    kspace_gradcam_key: Optional[str] = Field(default=None, description="MinIO key where the K-space Grad-CAM overlay is stored")
+    kspace_log_mag_key: Optional[str] = Field(default=None, description="MinIO key where the K-space log-magnitude is stored")
+    reconstructed_gradcam_key: Optional[str] = Field(default=None, description="MinIO key where the reconstructed image Grad-CAM overlay is stored")
     message: Optional[str] = None

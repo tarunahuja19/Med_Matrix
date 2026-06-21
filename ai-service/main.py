@@ -214,6 +214,173 @@ PATHOLOGY_CLASSES = [
 
 _PATHOLOGY_MODEL = None
 
+def compute_kspace_gradcam(model, x_final, target_class_idx):
+    """
+    Computes a Grad-CAM heatmap on the K-space encoder branch (relu4 of KSpaceS4Encoder).
+    """
+    model.eval()
+    
+    # Store activations and gradients
+    activations = []
+    gradients = []
+    
+    def forward_hook(module, input, output):
+        activations.append(output)
+        
+    def backward_hook(module, grad_input, grad_output):
+        gradients.append(grad_output[0])
+        
+    # Conv4 is the final conv layer in KSpaceS4Encoder
+    target_layer = model.s4_branch.encoder.conv4
+    h_forward = target_layer.register_forward_hook(forward_hook)
+    h_backward = target_layer.register_full_backward_hook(backward_hook)
+    
+    try:
+        # Enable grads for backward pass
+        with torch.enable_grad():
+            # detach and clone input to avoid side effects
+            x_input = x_final.detach().clone()
+            
+            # Forward pass
+            logits = model(x_input)
+            
+            # Backward pass for the target class
+            score = logits[0, target_class_idx]
+            model.zero_grad()
+            score.backward()
+    except Exception as e:
+        logger.error(f"Error inside compute_kspace_gradcam: {e}")
+        return None
+    finally:
+        # Always remove hooks to prevent memory leaks
+        h_forward.remove()
+        h_backward.remove()
+        
+    if not activations or not gradients:
+        logger.warning("Grad-CAM hooks failed to capture activations/gradients")
+        return None
+        
+    # act shape: [B * S, 128, H_feat, W_feat] = [8, 128, 8, 8]
+    act = activations[0].detach()
+    # grad shape: [8, 128, 8, 8]
+    grad = gradients[0].detach()
+    
+    # Global average pooling of gradients along spatial dimensions of features
+    # weights shape: [8, 128, 1, 1]
+    weights = torch.mean(grad, dim=(2, 3), keepdim=True)
+    
+    # Weighted combination of feature maps
+    # cam shape: [8, 8, 8]
+    cam = torch.sum(weights * act, dim=1)
+    
+    # Apply ReLU
+    cam = torch.clamp(cam, min=0)
+    
+    # Upsample to target K-space resolution (128x128)
+    # Target shape: [1, 1, 8, 128, 128]
+    cam = cam.unsqueeze(0).unsqueeze(1) # [1, 1, 8, 8, 8]
+    cam_upsampled = torch.nn.functional.interpolate(
+        cam, size=(8, 128, 128), mode='trilinear', align_corners=False
+    ).squeeze(0).squeeze(0) # [8, 128, 128]
+    
+    # Normalize per-slice to [0, 1]
+    cam_np = cam_upsampled.cpu().numpy()
+    for s in range(cam_np.shape[0]):
+        slice_min = cam_np[s].min()
+        slice_max = cam_np[s].max()
+        denom = slice_max - slice_min
+        if denom > 1e-8:
+            cam_np[s] = (cam_np[s] - slice_min) / denom
+        else:
+            cam_np[s] = np.zeros_like(cam_np[s])
+            
+    return cam_np
+
+def compute_reconstructed_gradcam(model, x_final, target_class_idx):
+    """
+    Computes a Grad-CAM heatmap on the reconstructed spatial branch (relu4 of VolumeCNNClassifier).
+    """
+    model.eval()
+    
+    # Store activations and gradients
+    activations = []
+    gradients = []
+    
+    def forward_hook(module, input, output):
+        activations.append(output)
+        
+    def backward_hook(module, grad_input, grad_output):
+        gradients.append(grad_output[0])
+        
+    # conv4 is the final conv layer in VolumeCNNClassifier
+    target_layer = model.cnn_branch.conv4
+    h_forward = target_layer.register_forward_hook(forward_hook)
+    h_backward = target_layer.register_full_backward_hook(backward_hook)
+    
+    try:
+        # Enable grads for backward pass
+        with torch.enable_grad():
+            x_input = x_final.detach().clone()
+            
+            # Forward pass
+            logits = model(x_input)
+            
+            # Backward pass for the target class
+            score = logits[0, target_class_idx]
+            model.zero_grad()
+            score.backward()
+    except Exception as e:
+        logger.error(f"Error inside compute_reconstructed_gradcam: {e}")
+        return None
+    finally:
+        # Always remove hooks to prevent memory leaks
+        h_forward.remove()
+        h_backward.remove()
+        
+    if not activations or not gradients:
+        logger.warning("Reconstructed Grad-CAM hooks failed to capture activations/gradients")
+        return None
+        
+    # act shape: [B, 128, S_down, H_down, W_down] = [1, 128, 1, 8, 8]
+    act = activations[0].detach()
+    # grad shape: [1, 128, 1, 8, 8]
+    grad = gradients[0].detach()
+    
+    # Global average pooling of gradients along spatial dimensions (dim 2, 3, 4)
+    # weights shape: [1, 128, 1, 1, 1]
+    weights = torch.mean(grad, dim=(2, 3, 4), keepdim=True)
+    
+    # Weighted combination of feature maps
+    # cam shape: [1, S_down, H_down, W_down] = [1, 1, 8, 8]
+    cam = torch.sum(weights * act, dim=1)
+    
+    # Apply ReLU
+    cam = torch.clamp(cam, min=0)
+    
+    # Upsample to target reconstructed image resolution
+    # Target shape: [1, 1, slices, height, width]
+    cam = cam.unsqueeze(1) # [1, 1, S_down, H_down, W_down]
+    
+    _, slices, _, height, width = x_final.shape
+    
+    cam_upsampled = torch.nn.functional.interpolate(
+        cam, size=(slices, height, width), mode='trilinear', align_corners=False
+    ).squeeze(0).squeeze(0) # [slices, height, width]
+    
+    # Normalize per-slice to [0, 1]
+    cam_np = cam_upsampled.cpu().numpy()
+    for s in range(cam_np.shape[0]):
+        slice_min = cam_np[s].min()
+        slice_max = cam_np[s].max()
+        denom = slice_max - slice_min
+        if denom > 1e-8:
+            cam_np[s] = (cam_np[s] - slice_min) / denom
+        else:
+            cam_np[s] = np.zeros_like(cam_np[s])
+            
+    return cam_np
+
+
 def get_pathology_model():
     global _PATHOLOGY_MODEL
     if _PATHOLOGY_MODEL is not None:
@@ -426,6 +593,9 @@ def predict(request: PredictRequest):
         predicted_pathology = None
         pathology_confidence = None
         pathology_probs = None
+        kspace_gradcam_key = None
+        kspace_log_mag_key = None
+        reconstructed_gradcam_key = None
 
         try:
             logger.info("[predict] Running Fused S4-CNN pathology classifier...")
@@ -513,6 +683,65 @@ def predict(request: PredictRequest):
                 }
 
             logger.info(f"[predict] Pathology prediction complete: {predicted_pathology} (conf={pathology_confidence:.4f})")
+
+            # ── Compute K-space Grad-CAM & Log-magnitude ─────────────────────
+            try:
+                logger.info(f"[predict] Computing K-Space Grad-CAM for class {predicted_pathology} (idx: {pred_idx})...")
+                gradcam_heatmap = compute_kspace_gradcam(pathology_model, x_final, pred_idx)
+                
+                logger.info(f"[predict] Computing Reconstructed Image Grad-CAM for class {predicted_pathology} (idx: {pred_idx})...")
+                reconstructed_gradcam_heatmap = compute_reconstructed_gradcam(pathology_model, x_final, pred_idx)
+                
+                if gradcam_heatmap is not None:
+                    # Compute Log-Magnitude of K-space (coils combined via RSS)
+                    kspace_mag = torch.sqrt(torch.sum(torch.abs(x_final)**2, dim=2)).squeeze(0) # [8, 128, 128]
+                    kspace_log_mag = torch.log(1.0 + kspace_mag).cpu().numpy()
+                    
+                    # Normalize K-space log-magnitude to [0, 1] per slice
+                    for s in range(kspace_log_mag.shape[0]):
+                        slice_min = kspace_log_mag[s].min()
+                        slice_max = kspace_log_mag[s].max()
+                        denom = slice_max - slice_min
+                        if denom > 1e-8:
+                            kspace_log_mag[s] = (kspace_log_mag[s] - slice_min) / denom
+                        else:
+                            kspace_log_mag[s] = np.zeros_like(kspace_log_mag[s])
+                            
+                    kspace_gradcam_key = f"{request.study_id}/kspace_gradcam.npy"
+                    kspace_log_mag_key = f"{request.study_id}/kspace_log_mag.npy"
+                    
+                    local_gradcam_path = os.path.join(tmpdir, "kspace_gradcam.npy")
+                    local_log_mag_path = os.path.join(tmpdir, "kspace_log_mag.npy")
+                    
+                    np.save(local_gradcam_path, gradcam_heatmap)
+                    np.save(local_log_mag_path, kspace_log_mag)
+                    
+                    minio_client.fput_object(
+                        bucket_name="reconstructed",
+                        object_name=kspace_gradcam_key,
+                        file_path=local_gradcam_path
+                    )
+                    minio_client.fput_object(
+                        bucket_name="reconstructed",
+                        object_name=kspace_log_mag_key,
+                        file_path=local_log_mag_path
+                    )
+                    logger.info("[predict] K-Space Grad-CAM and log-magnitude arrays uploaded successfully.")
+
+                if reconstructed_gradcam_heatmap is not None:
+                    reconstructed_gradcam_key = f"{request.study_id}/reconstructed_gradcam.npy"
+                    local_reconstructed_gradcam_path = os.path.join(tmpdir, "reconstructed_gradcam.npy")
+                    np.save(local_reconstructed_gradcam_path, reconstructed_gradcam_heatmap)
+                    
+                    minio_client.fput_object(
+                        bucket_name="reconstructed",
+                        object_name=reconstructed_gradcam_key,
+                        file_path=local_reconstructed_gradcam_path
+                    )
+                    logger.info("[predict] Reconstructed Image Grad-CAM array uploaded successfully.")
+            except Exception as cam_err:
+                logger.error(f"[predict] Grad-CAM generation failed: {cam_err}")
+
         except Exception as e:
             logger.error(f"[predict] Pathology classification failed: {e}")
 
@@ -527,5 +756,8 @@ def predict(request: PredictRequest):
             predicted_pathology=predicted_pathology,
             pathology_confidence=pathology_confidence,
             pathology_probabilities=pathology_probs,
+            kspace_gradcam_key=kspace_gradcam_key,
+            kspace_log_mag_key=kspace_log_mag_key,
+            reconstructed_gradcam_key=reconstructed_gradcam_key,
             message=reason,
         )

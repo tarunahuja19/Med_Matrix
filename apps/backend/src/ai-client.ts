@@ -51,6 +51,9 @@ export interface PredictResponse {
   predicted_pathology: string | null
   pathology_confidence: number | null
   pathology_probabilities: Record<string, number> | null
+  kspace_gradcam_key: string | null
+  kspace_log_mag_key: string | null
+  reconstructed_gradcam_key: string | null
   message: string | null
 }
 
@@ -67,6 +70,9 @@ export interface AIInferenceResult {
   predictedPathology: string | null
   pathologyConfidence: number | null
   pathologyProbabilities: Record<string, number> | null
+  kspaceGradcamKey: string | null
+  kspaceLogMagKey: string | null
+  reconstructedGradcamKey: string | null
 }
 
 // ---------------------------------------------------------------------------
@@ -120,6 +126,9 @@ export class AIServiceClient {
       predicted_pathology,
       pathology_confidence,
       pathology_probabilities,
+      kspace_gradcam_key,
+      kspace_log_mag_key,
+      reconstructed_gradcam_key,
     } = data
 
     // ── 2. Persist ModelResult (Anomaly Detection) ──────────────────────────
@@ -186,6 +195,9 @@ export class AIServiceClient {
       predictedPathology: predicted_pathology,
       pathologyConfidence: pathology_confidence,
       pathologyProbabilities: pathology_probabilities,
+      kspaceGradcamKey: kspace_gradcam_key ?? null,
+      kspaceLogMagKey: kspace_log_mag_key ?? null,
+      reconstructedGradcamKey: reconstructed_gradcam_key ?? null,
     }
   }
 }

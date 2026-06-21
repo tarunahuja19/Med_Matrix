@@ -159,4 +159,52 @@ router.get('/:id/reconstructed', async (req, res) => {
   }
 })
 
+// ---------------------------------------------------------------------------
+// GET /studies/:id/kspace-log-mag
+// Streams the log-magnitude K-space binary .npy file from MinIO
+// ---------------------------------------------------------------------------
+router.get('/:id/kspace-log-mag', async (req, res) => {
+  const { id } = req.params
+  try {
+    const stream = await minioClient.getObject('reconstructed', `${id}/kspace_log_mag.npy`)
+    res.setHeader('Content-Type', 'application/octet-stream')
+    stream.pipe(res)
+  } catch (err: any) {
+    console.error(`Failed to fetch kspace log-magnitude for study ${id}: ${err.message}`)
+    res.status(500).json({ error: `Failed to fetch kspace log-magnitude: ${err.message}` })
+  }
+})
+
+// ---------------------------------------------------------------------------
+// GET /studies/:id/kspace-gradcam
+// Streams the K-space Grad-CAM overlay binary .npy file from MinIO
+// ---------------------------------------------------------------------------
+router.get('/:id/kspace-gradcam', async (req, res) => {
+  const { id } = req.params
+  try {
+    const stream = await minioClient.getObject('reconstructed', `${id}/kspace_gradcam.npy`)
+    res.setHeader('Content-Type', 'application/octet-stream')
+    stream.pipe(res)
+  } catch (err: any) {
+    console.error(`Failed to fetch kspace Grad-CAM for study ${id}: ${err.message}`)
+    res.status(500).json({ error: `Failed to fetch kspace Grad-CAM: ${err.message}` })
+  }
+})
+
+// ---------------------------------------------------------------------------
+// GET /studies/:id/reconstructed-gradcam
+// Streams the reconstructed image Grad-CAM overlay binary .npy file from MinIO
+// ---------------------------------------------------------------------------
+router.get('/:id/reconstructed-gradcam', async (req, res) => {
+  const { id } = req.params
+  try {
+    const stream = await minioClient.getObject('reconstructed', `${id}/reconstructed_gradcam.npy`)
+    res.setHeader('Content-Type', 'application/octet-stream')
+    stream.pipe(res)
+  } catch (err: any) {
+    console.error(`Failed to fetch reconstructed Grad-CAM for study ${id}: ${err.message}`)
+    res.status(500).json({ error: `Failed to fetch reconstructed Grad-CAM: ${err.message}` })
+  }
+})
+
 export default router

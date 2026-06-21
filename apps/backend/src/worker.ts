@@ -64,6 +64,9 @@ async function processStudy(job: Job<StudyJobData>): Promise<void> {
     predictedPathology: inferenceResult.predictedPathology,
     pathologyConfidence: inferenceResult.pathologyConfidence,
     pathologyProbabilities: inferenceResult.pathologyProbabilities,
+    kspaceGradcamKey: inferenceResult.kspaceGradcamKey,
+    kspaceLogMagKey: inferenceResult.kspaceLogMagKey,
+    reconstructedGradcamKey: inferenceResult.reconstructedGradcamKey,
     note: inferenceResult.anomalyDetected
       ? undefined
       : 'K-Space anomaly score below threshold — image encoder not triggered.',
