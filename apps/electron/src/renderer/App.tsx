@@ -516,8 +516,8 @@ function ClinicalMRIViewer({
   const [gradcamData, setGradcamData] = useState<{ shape: number[]; data: any } | null>(null)
   const [sliceIndex, setSliceIndex] = useState(0)
   const [opacity, setOpacity] = useState(0.85) // Boosted default opacity to 85% for brighter overlay upon initialization
-  const [showOverlay, setShowOverlay] = useState(true)
-  const [showGrowth, setShowGrowth] = useState(true)
+  const [showOverlay, setShowOverlay] = useState(false)
+  const [showGrowth, setShowGrowth] = useState(false)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
 
   const [localTimeline, setLocalTimeline] = useState<ProgressionPoint[] | null>(null)
@@ -693,7 +693,7 @@ function ClinicalMRIViewer({
   const [slices, height, width] = arrayData.shape
 
   return (
-    <div className="bevel-inset" style={{ background: '#0a0d10', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+    <div style={{ background: '#ffffff', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px', border: '1px solid #cbd5e0', borderRadius: '4px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-text-dim)' }}>
         <span>RESOLUTION: {width}x{height}</span>
         <span>SLICE: {sliceIndex + 1} / {slices}</span>
@@ -701,20 +701,20 @@ function ClinicalMRIViewer({
       
       <div style={{ display: 'flex', gap: '14px', alignItems: 'center', justifyContent: 'center' }}>
         <div className="bevel-inset" style={{ background: '#000', padding: '6px', display: 'inline-block', borderRadius: '4px', boxShadow: 'inset 0 0 10px rgba(0,0,0,0.85)' }}>
-          <canvas ref={canvasRef} style={{ width: '220px', height: '220px', display: 'block', borderRadius: '2px' }} />
+          <canvas ref={canvasRef} style={{ width: '320px', height: '320px', display: 'block', borderRadius: '2px' }} />
         </div>
 
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '8px', color: '#fff', fontSize: '13px', maxHeight: '220px', overflowY: 'auto' }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '8px', color: '#2d3748', fontSize: '13px', maxHeight: '320px', overflowY: 'auto' }}>
           <div style={{ fontWeight: 'bold', color: 'var(--color-accent-blue)', textTransform: 'uppercase', fontSize: '13px' }}>
             Spatial Domain Key:
           </div>
-          <div style={{ background: 'rgba(255,255,255,0.05)', padding: '6px', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '3px' }}>
+          <div style={{ background: '#f8fafc', padding: '6px', border: '1px solid #e2e8f0', borderRadius: '3px' }}>
             <div style={{ color: 'var(--color-accent-amber)', fontWeight: 'bold', fontSize: '13px' }}>Pathological Hotspots (Red):</div>
             <div style={{ fontSize: '12px', color: 'var(--color-text-dim)', marginTop: '2px' }}>
               Structural anomalies, lesions, tumor tissue or edema driving detection.
             </div>
           </div>
-          <div style={{ background: 'rgba(255,255,255,0.05)', padding: '6px', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '3px' }}>
+          <div style={{ background: '#f8fafc', padding: '6px', border: '1px solid #e2e8f0', borderRadius: '3px' }}>
             <div style={{ color: 'var(--color-accent-blue)', fontWeight: 'bold', fontSize: '13px' }}>Normal Anatomy (Blue/Dark):</div>
             <div style={{ fontSize: '12px', color: 'var(--color-text-dim)', marginTop: '2px' }}>
               Healthy cerebral structures and background tissue ignored by classifier.
@@ -740,8 +740,8 @@ function ClinicalMRIViewer({
         </div>
       </div>
 
-      <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '8px', borderTop: '1px solid #1a252f', paddingTop: '10px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px', color: '#fff' }}>
+      <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '8px', borderTop: '1px solid #cbd5e0', paddingTop: '10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px', color: '#2d3748' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontFamily: 'var(--font-mono)' }}>
               <input 
@@ -1747,7 +1747,7 @@ function KSpaceGradCAMViewer({ studyId }: { studyId: string }) {
   const [gradcamData, setGradcamData] = useState<{ shape: number[]; data: any } | null>(null)
   const [sliceIndex, setSliceIndex] = useState(0)
   const [opacity, setOpacity] = useState(0.85) // Boosted default opacity to 85% for brighter overlay upon initialization
-  const [showOverlay, setShowOverlay] = useState(true)
+  const [showOverlay, setShowOverlay] = useState(false)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
 
   useEffect(() => {
@@ -1864,7 +1864,7 @@ function KSpaceGradCAMViewer({ studyId }: { studyId: string }) {
   const [slices, height, width] = kspaceData.shape
 
   return (
-    <div className="bevel-inset" style={{ background: '#0a0d10', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+    <div style={{ background: '#ffffff', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px', border: '1px solid #cbd5e0', borderRadius: '4px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-text-dim)' }}>
         <span>K-SPACE RESOLUTION: {width}x{height}</span>
         <span>SLICE: {sliceIndex + 1} / {slices}</span>
@@ -1872,22 +1872,22 @@ function KSpaceGradCAMViewer({ studyId }: { studyId: string }) {
       
       <div style={{ display: 'flex', gap: '14px', alignItems: 'center', justifyContent: 'center' }}>
         <div className="bevel-inset" style={{ background: '#000', padding: '6px', position: 'relative', display: 'inline-block', borderRadius: '4px', boxShadow: 'inset 0 0 10px rgba(0,0,0,0.85)' }}>
-          <canvas ref={canvasRef} style={{ width: '220px', height: '220px', display: 'block', borderRadius: '2px' }} />
+          <canvas ref={canvasRef} style={{ width: '320px', height: '320px', display: 'block', borderRadius: '2px' }} />
           <div style={{ position: 'absolute', top: '6px', left: '50%', transform: 'translateX(-50%)', fontSize: '11px', color: 'rgba(255,255,255,0.4)', fontFamily: 'var(--font-mono)' }}>ky (phase)</div>
           <div style={{ position: 'absolute', top: '50%', right: '10px', transform: 'translateY(-50%)', fontSize: '11px', color: 'rgba(255,255,255,0.4)', fontFamily: 'var(--font-mono)' }}>kx (freq)</div>
         </div>
 
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '8px', color: '#fff', fontSize: '13px' }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '8px', color: '#2d3748', fontSize: '13px', maxHeight: '320px', overflowY: 'auto' }}>
           <div style={{ fontWeight: 'bold', color: 'var(--color-accent-blue)', textTransform: 'uppercase', fontSize: '13px' }}>
             Frequency Domain Key:
           </div>
-          <div style={{ background: 'rgba(255,255,255,0.05)', padding: '6px', border: '1px solid rgba(255,255,255,0.1)' }}>
+          <div style={{ background: '#f8fafc', padding: '6px', border: '1px solid #e2e8f0', borderRadius: '3px' }}>
             <div style={{ color: 'var(--color-accent-amber)', fontWeight: 'bold', fontSize: '13px' }}>Center (Low Frequencies):</div>
             <div style={{ fontSize: '12px', color: 'var(--color-text-dim)', marginTop: '2px' }}>
               Governs main structures, coarse shapes & overall image contrast.
             </div>
           </div>
-          <div style={{ background: 'rgba(255,255,255,0.05)', padding: '6px', border: '1px solid rgba(255,255,255,0.1)' }}>
+          <div style={{ background: '#f8fafc', padding: '6px', border: '1px solid #e2e8f0', borderRadius: '3px' }}>
             <div style={{ color: 'var(--color-accent-blue)', fontWeight: 'bold', fontSize: '13px' }}>Periphery (High Frequencies):</div>
             <div style={{ fontSize: '12px', color: 'var(--color-text-dim)', marginTop: '2px' }}>
               Governs high-resolution edges, fine features, noise & artifacts.
@@ -1896,8 +1896,8 @@ function KSpaceGradCAMViewer({ studyId }: { studyId: string }) {
         </div>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', borderTop: '1px solid #1a252f', paddingTop: '10px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '13px', color: '#fff' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', borderTop: '1px solid #cbd5e0', paddingTop: '10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '13px', color: '#2d3748' }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontFamily: 'var(--font-mono)' }}>
             <input 
               type="checkbox" 
@@ -3981,24 +3981,24 @@ export default function App() {
 
                   {/* Summary Indicators */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    <div className="bevel-inset" style={{ padding: '10px', background: '#0a0d10', color: 'var(--color-accent-blue)' }}>
+                    <div style={{ padding: '10px', background: '#ffffff', border: '1px solid #cbd5e0', borderRadius: '4px' }}>
                       <div style={{ fontSize: '10px', color: 'var(--color-text-dim)', textTransform: 'uppercase', fontFamily: 'var(--font-mono)' }}>TOTAL INGESTED SCANS</div>
-                      <div style={{ fontSize: '28px', fontFamily: 'var(--font-mono)', fontWeight: 'bold', color: '#00ffff' }}>{String(total).padStart(4, '0')}</div>
+                      <div style={{ fontSize: '28px', fontFamily: 'var(--font-mono)', fontWeight: 'bold', color: '#2b6cb0' }}>{String(total).padStart(4, '0')}</div>
                     </div>
 
-                    <div className="bevel-inset" style={{ padding: '10px', background: '#0a0d10', color: 'var(--color-accent-green)' }}>
+                    <div style={{ padding: '10px', background: '#ffffff', border: '1px solid #cbd5e0', borderRadius: '4px' }}>
                       <div style={{ fontSize: '10px', color: 'var(--color-text-dim)', textTransform: 'uppercase', fontFamily: 'var(--font-mono)' }}>K-SPACE GATING RATE</div>
-                      <div style={{ fontSize: '28px', fontFamily: 'var(--font-mono)', fontWeight: 'bold', color: 'var(--color-accent-amber)' }}>{gatingRate.toFixed(1)}%</div>
+                      <div style={{ fontSize: '28px', fontFamily: 'var(--font-mono)', fontWeight: 'bold', color: '#c05621' }}>{gatingRate.toFixed(1)}%</div>
                     </div>
 
-                    <div className="bevel-inset" style={{ padding: '10px', background: '#0a0d10', color: 'var(--color-accent-green)' }}>
+                    <div style={{ padding: '10px', background: '#ffffff', border: '1px solid #cbd5e0', borderRadius: '4px' }}>
                       <div style={{ fontSize: '10px', color: 'var(--color-text-dim)', textTransform: 'uppercase', fontFamily: 'var(--font-mono)' }}>AVG AI CONFIDENCE</div>
-                      <div style={{ fontSize: '28px', fontFamily: 'var(--font-mono)', fontWeight: 'bold', color: '#39a169' }}>{avgConfidence.toFixed(1)}%</div>
+                      <div style={{ fontSize: '28px', fontFamily: 'var(--font-mono)', fontWeight: 'bold', color: '#2f855a' }}>{avgConfidence.toFixed(1)}%</div>
                     </div>
 
-                    <div className="bevel-inset" style={{ padding: '10px', background: '#0a0d10', color: 'var(--color-accent-blue)' }}>
+                    <div style={{ padding: '10px', background: '#ffffff', border: '1px solid #cbd5e0', borderRadius: '4px' }}>
                       <div style={{ fontSize: '10px', color: 'var(--color-text-dim)', textTransform: 'uppercase', fontFamily: 'var(--font-mono)' }}>MOST COMMON PATHOLOGY</div>
-                      <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#fff', marginTop: '6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#2d3748', marginTop: '6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {mostFrequent.replace(/_/g, ' ').toUpperCase()}
                       </div>
                     </div>
