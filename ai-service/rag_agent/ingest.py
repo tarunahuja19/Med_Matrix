@@ -1,131 +1,115 @@
 import os
 import re
-import sys
+import json
+import logging
+from upstash_redis import Redis
 import google.generativeai as genai
-from rag_agent.config import get_gemini_api_key
-from rag_agent.store import store_disease_chunks, clear_all_documents
+from rag_agent.gemini_client import call_gemini_with_retry
 
-def parse_markdown_sections(text: str) -> list:
-    """Parses a disease reference markdown file into individual section chunks."""
-    # Split the file by Markdown H2 headers (e.g. ## 1. Section Name)
-    pattern = r'(^##\s+.*$)'
-    parts = re.split(pattern, text, flags=re.MULTILINE)
+logger = logging.getLogger("rag-agent-ingest")
+
+def get_redis_client():
+    url = os.getenv("UPSTASH_REDIS_REST_URL")
+    token = os.getenv("UPSTASH_REDIS_REST_TOKEN")
+    if not url or not token:
+        raise ValueError("Upstash Redis credentials (UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN) missing in environment")
+    return Redis(url=url, token=token)
+
+def parse_markdown_file(file_path):
+    """
+    Parses a disease reference markdown file, splitting it by H2 headers
+    to extract sections with their titles and contents.
+    """
+    with open(file_path, 'r', encoding='utf-8') as f:
+        text = f.read()
     
-    # Content before the first H2 is the Overview
-    overview_content = parts[0].strip()
-    
+    # Split by H2 heading (starting with ## at start of line or following newline)
+    parts = re.split(r'\n##\s+', '\n' + text)
     sections = []
-    if overview_content:
-        # Strip the H1 header from overview content if present to keep it clean
-        overview_clean = re.sub(r'^#\s+.*$', '', overview_content, flags=re.MULTILINE).strip()
-        if overview_clean:
+    
+    for part in parts[1:]:
+        lines = part.split('\n')
+        if not lines:
+            continue
+        title = lines[0].strip()
+        content = '\n'.join(lines[1:]).strip()
+        if title and content:
             sections.append({
-                "section": "Overview",
-                "content": overview_clean
-            })
-            
-    for i in range(1, len(parts), 2):
-        heading = parts[i].strip()
-        content = parts[i+1].strip() if i+1 < len(parts) else ""
-        
-        # Clean heading, e.g. "## 2. Radiographic & Imaging Findings" -> "Radiographic & Imaging Findings"
-        section_name = re.sub(r'^##\s*(\d+\.\s*)?', '', heading).strip()
-        
-        if content:
-            sections.append({
-                "section": section_name,
-                "content": content
+                "section": title,
+                "content": content,
+                "source": "MedMatrix Disease Reference"
             })
             
     return sections
 
-def ingest_disease_file(file_path: str, source_name: str = "MedMatrix Disease Reference") -> bool:
-    """Reads a single markdown disease reference file, generates embeddings with Gemini, and saves to Upstash Redis."""
-    api_key = get_gemini_api_key()
-    if not api_key:
-        print("❌ Error: No GEMINI_API_KEYS are configured in .env.")
-        return False
+def embed_sections(sections):
+    """
+    Batch embeds all sections using Gemini text-embedding-004.
+    """
+    if not sections:
+        return []
         
-    filename = os.path.basename(file_path)
-    disease_name = os.path.splitext(filename)[0]
+    contents = [f"{sec['section']}\n\n{sec['content']}" for sec in sections]
     
-    print(f"Processing '{disease_name}' from {filename}...")
+    response = call_gemini_with_retry(
+        genai.embed_content,
+        model="models/gemini-embedding-001",
+        content=contents
+    )
     
-    try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            text = f.read()
-            
-        sections = parse_markdown_sections(text)
-        if not sections:
-            print(f"⚠️ No sections found in {filename}.")
-            return False
-            
-        print(f"Found {len(sections)} sections. Generating Gemini embeddings...")
+    embeddings = response.get('embedding', [])
+    for i, emb in enumerate(embeddings):
+        sections[i]["embedding"] = emb
         
-        # Configure Gemini API
-        genai.configure(api_key=api_key)
-        
-        # Prepare all contents for batch embedding
-        contents = [sec["content"] for sec in sections]
-        cleaned_contents = [c.replace("\n", " ") for c in contents]
-        
-        # Call Gemini Embeddings API (batch request)
-        response = genai.embed_content(
-            model="models/gemini-embedding-001",
-            content=cleaned_contents
-        )
-        
-        # Extract embeddings list from response
-        embeddings = response.get("embedding", [])
-        if not embeddings:
-            print(f"❌ Failed to get embeddings from Gemini API for {disease_name}")
-            return False
-            
-        # Store all sections in Upstash Redis as a JSON list
-        chunks_to_store = []
-        for idx, sec in enumerate(sections):
-            embedding = embeddings[idx]
-            chunks_to_store.append({
-                "section": sec["section"],
-                "content": sec["content"],
-                "source": source_name,
-                "embedding": embedding
-            })
-            
-        success = store_disease_chunks(disease_name, chunks_to_store)
-        if success:
-            print(f"Successfully stored {len(sections)} chunks in Redis for {disease_name}.")
-        return success
-        
-    except Exception as e:
-        print(f"❌ Failed to ingest {filename}: {e}", file=sys.stderr)
-        return False
+    return sections
 
-def run_full_ingestion(data_dir: str) -> int:
-    """Scans data directory and ingests all Markdown files found."""
-    if not os.path.exists(data_dir):
-        print(f"❌ Error: Data directory '{data_dir}' does not exist.", file=sys.stderr)
+def run_single_file_ingestion(file_path, redis_client=None):
+    """Parses, embeds, and stores a single markdown file into Upstash Redis."""
+    if redis_client is None:
+        redis_client = get_redis_client()
+        
+    basename = os.path.basename(file_path)
+    disease_name = os.path.splitext(basename)[0].lower()
+    
+    logger.info(f"Ingesting file: {file_path} for disease: {disease_name}...")
+    sections = parse_markdown_file(file_path)
+    if not sections:
+        logger.warning(f"No sections parsed from {file_path}")
         return 0
         
-    md_files = [f for f in os.listdir(data_dir) if f.endswith(".md") and f != "hi,.md"]
+    sections_with_embeddings = embed_sections(sections)
+    
+    redis_key = f"med_docs:{disease_name}"
+    # Serialize to JSON and save to Upstash Redis
+    redis_client.set(redis_key, json.dumps(sections_with_embeddings))
+    logger.info(f"Successfully stored {len(sections_with_embeddings)} chunks under Redis key: {redis_key}")
+    return len(sections_with_embeddings)
+
+def run_full_ingestion(data_dir):
+    """Ingests all markdown files from the specified data directory."""
+    logger.info(f"Starting full RAG ingestion from directory: {data_dir}...")
+    redis_client = get_redis_client()
+    
+    if not os.path.isdir(data_dir):
+        raise FileNotFoundError(f"Data directory '{data_dir}' does not exist")
+        
+    md_files = [
+        os.path.join(data_dir, f)
+        for f in os.listdir(data_dir)
+        if f.endswith('.md')
+    ]
+    
     if not md_files:
-        print("⚠️ No Markdown files found to ingest.")
+        logger.warning(f"No markdown reference files found in {data_dir}")
         return 0
         
-    print(f"Found {len(md_files)} reference files to ingest.")
-    
-    # Clear existing documents in Upstash Redis
-    clear_all_documents()
-    
-    successful_files = 0
-    for filename in md_files:
-        file_path = os.path.join(data_dir, filename)
-        if ingest_disease_file(file_path):
-            successful_files += 1
+    success_count = 0
+    for file_path in md_files:
+        try:
+            run_single_file_ingestion(file_path, redis_client)
+            success_count += 1
+        except Exception as e:
+            logger.error(f"Failed to ingest {file_path}: {e}")
             
-    print(f"\n🎉 Ingestion complete! Successfully processed {successful_files}/{len(md_files)} files in Redis.")
-    return successful_files
-
-if __name__ == "__main__":
-    default_data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data"))
-    run_full_ingestion(default_data_dir)
+    logger.info(f"Full ingestion completed. Successfully processed {success_count}/{len(md_files)} files.")
+    return success_count

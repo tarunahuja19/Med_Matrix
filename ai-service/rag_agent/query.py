@@ -1,153 +1,272 @@
-import datetime
+import os
+import json
+import logging
+import re
+from datetime import datetime
 import numpy as np
 import google.generativeai as genai
-from rag_agent.config import get_gemini_api_key
-from rag_agent.store import get_disease_chunks
-from rag_agent.cache import get_cached_report, set_cached_report
+from rag_agent.gemini_client import call_gemini_with_retry
+from rag_agent.ingest import get_redis_client, run_single_file_ingestion
 
-# Hardcoded system prompt template as per architecture specification
-SYSTEM_PROMPT = """You are a radiology reporting assistant. Always output reports in exactly this format, no deviations:
+logger = logging.getLogger("rag-agent-query")
+
+def get_age_bucket(age: int) -> str:
+    """Classifies age into demographic buckets."""
+    if age <= 12:
+        return "child"
+    elif age <= 17:
+        return "adolescent"
+    elif age <= 35:
+        return "young_adult"
+    elif age <= 65:
+        return "adult"
+    else:
+        return "senior"
+
+def get_patient_age(patient_metadata: dict) -> int:
+    """Retrieves or calculates age from patient metadata."""
+    age = patient_metadata.get("age")
+    if age is not None:
+        try:
+            return int(age)
+        except ValueError:
+            pass
+            
+    # Calculate from dateOfBirth if age is not directly provided
+    dob_str = patient_metadata.get("dateOfBirth")
+    if dob_str:
+        try:
+            # Handle ISO timestamp format (e.g. 2026-06-21T00:00:00.000Z)
+            dob_clean = dob_str.split("T")[0]
+            dob = datetime.strptime(dob_clean, "%Y-%m-%d")
+            today = datetime.today()
+            return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+        except Exception as e:
+            logger.warning(f"Failed to parse dateOfBirth '{dob_str}': {e}")
+            
+    return 40  # Fallback default age
+
+def cosine_similarity(a, b):
+    """Computes cosine similarity between two 1D vectors."""
+    a = np.array(a)
+    b = np.array(b)
+    dot = np.dot(a, b)
+    norm_a = np.linalg.norm(a)
+    norm_b = np.linalg.norm(b)
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return float(dot / (norm_a * norm_b))
+
+def find_matching_markdown_file(disease_name: str, data_dir: str = "/app/data") -> str | None:
+    """Attempts to find a matching markdown file for self-healing ingestion."""
+    # Check current workspace paths
+    possible_paths = [
+        data_dir,
+        os.path.join(os.path.dirname(os.path.dirname(__file__)), "data"),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data")),
+        "data"
+    ]
+    
+    clean_query = disease_name.lower().strip().replace(" ", "_")
+    
+    for path in possible_paths:
+        if not os.path.exists(path):
+            continue
+        for f in os.listdir(path):
+            if f.endswith(".md"):
+                name_without_ext = os.path.splitext(f)[0].lower().replace(" ", "_")
+                # Direct match or query match
+                if name_without_ext == clean_query or name_without_ext.replace("_", "") == clean_query.replace("_", ""):
+                    return os.path.join(path, f)
+                    
+    return None
+
+def fetch_document_chunks(disease_name: str, redis_client) -> list:
+    """Fetches documents from Redis, falling back to local ingestion if missing."""
+    redis_key = f"med_docs:{disease_name}"
+    val = redis_client.get(redis_key)
+    
+    if val:
+        logger.info(f"Retrieved document chunks for '{disease_name}' from Redis.")
+        return json.loads(val)
+        
+    # Self-healing: Cache miss on reference data. Try to ingest the markdown file dynamically.
+    logger.warning(f"Cache miss for document chunks '{redis_key}'. Running self-healing ingestion...")
+    matching_file = find_matching_markdown_file(disease_name)
+    if matching_file:
+        try:
+            run_single_file_ingestion(matching_file, redis_client)
+            val = redis_client.get(redis_key)
+            if val:
+                return json.loads(val)
+        except Exception as e:
+            logger.error(f"Self-healing ingestion failed for '{matching_file}': {e}")
+            
+    logger.error(f"Could not retrieve or ingest reference data for disease: {disease_name}")
+    return []
+
+def generate_radiology_report(disease_name: str, patient_metadata: dict, llm_model: str = "gemini-3.5-flash") -> str:
+    """
+    Main query pipeline for the RAG agent.
+    Checks cache, runs vector similarity search if needed, calls LLM, and formats placeholders.
+    """
+    # 1. Normalize parameters
+    disease_clean = disease_name.lower().strip().replace(" ", "_")
+    age = get_patient_age(patient_metadata)
+    age_bucket = get_age_bucket(age)
+    sex = str(patient_metadata.get("gender", patient_metadata.get("sex", "male"))).lower().strip()
+    if sex.startswith("m"):
+        sex = "male"
+    elif sex.startswith("f"):
+        sex = "female"
+    else:
+        sex = "other"
+        
+    patient_name = patient_metadata.get("name", "Unknown Patient")
+    current_date = patient_metadata.get("date", patient_metadata.get("studyDate"))
+    if current_date:
+        try:
+            # Format input ISO date nicely (e.g. 2026-06-21T00:00:00.000Z -> June 21, 2026)
+            parsed_date = datetime.strptime(current_date.split("T")[0], "%Y-%m-%d")
+            current_date = parsed_date.strftime("%B %d, %Y")
+        except Exception:
+            pass
+    else:
+        current_date = datetime.now().strftime("%B %d, %Y")
+        
+    redis_client = get_redis_client()
+    cache_key = f"rad_report:{disease_clean}:{age_bucket}:{sex}"
+    
+    # 2. Cache Check
+    cached_template = redis_client.get(cache_key)
+    if cached_template:
+        logger.info(f"Cache HIT for report template: {cache_key}")
+        # Perform dynamic replacements of name and date
+        report_text = cached_template.decode("utf-8") if isinstance(cached_template, bytes) else str(cached_template)
+        report_text = report_text.replace("{name}", patient_name)
+        report_text = report_text.replace("{date}", current_date)
+        report_text = report_text.replace("{age}", str(age))
+        report_text = report_text.replace("{sex}", sex.capitalize())
+        return report_text
+        
+    logger.info(f"Cache MISS for report template: {cache_key}. Proceeding to RAG similarity search...")
+    
+    # 3. RAG Query (Retrieve top chunks)
+    chunks = fetch_document_chunks(disease_clean, redis_client)
+    if not chunks:
+        # Fallback if no reference data is found
+        return f"Error: No reference documentation found for disease '{disease_name}' to generate report."
+        
+    # Embed the query (disease_name + symptoms)
+    query_text = disease_name
+    symptoms = patient_metadata.get("symptoms", "")
+    if symptoms:
+        query_text += f" presenting with symptoms: {symptoms}"
+        
+    response = call_gemini_with_retry(
+        genai.embed_content,
+        model="models/gemini-embedding-001",
+        content=query_text
+    )
+    query_embedding = response.get('embedding', [])
+    
+    # Compute similarity and select top 5 chunks
+    scored_chunks = []
+    for chunk in chunks:
+        score = cosine_similarity(query_embedding, chunk["embedding"])
+        scored_chunks.append((score, chunk))
+        
+    scored_chunks.sort(key=lambda x: x[0], reverse=True)
+    top_chunks = [chunk for _, chunk in scored_chunks[:5]]
+    
+    # 4. Construct System Prompt & User Context
+    system_prompt = f"""You are an expert clinical radiologist assistant. Your task is to generate a standardized radiology report based on the provided reference medical context.
+
+You MUST strictly adhere to the following format. Do NOT deviate from this layout.
 
 ---
 RADIOLOGY REPORT
 
-Patient: {name} | Age: {age} | Sex: {sex}
-Date: {date}
+Patient: {{name}} | Age: {{age}} | Sex: {{sex}}
+Date: {{date}}
 
 CLINICAL INDICATION
-[Why the scan was ordered based on symptoms and disease]
+[Detailed description of clinical indication based on symptoms, disease, and age/sex]
 
 TECHNIQUE
-[Typical imaging modality and sequences used for this disease]
+[Standard imaging modality and sequences for this disease based on the reference context]
 
 FINDINGS
-[Organ-by-organ observations relevant to this disease]
+[Detailed organ-by-organ anatomical and signal observations based on the reference context]
 
 IMPRESSION
-1. [Most likely diagnosis]
-2. [Second differential]
-3. [Third differential if applicable]
+1. [Primary diagnosis/pathology: {disease_name}]
+2. [Second differential diagnosis]
+3. [Third differential diagnosis if applicable]
 
 RECOMMENDATION
-[Follow-up scan / biopsy / urgent referral as appropriate]
+[Suggested follow-up scans, referral, or clinical next steps]
 ---
 
-Use only information from the provided research context.
-Do not hallucinate findings. If context is insufficient, say so."""
+CRITICAL INSTRUCTIONS:
+1. You MUST output the placeholders '{{name}}' and '{{date}}' exactly as written in curly braces (with no spaces inside). Do NOT replace them with actual names or dates.
+2. The values for '{{age}}' and '{{sex}}' MUST be filled in with the patient's actual age (e.g. {age}) and sex (e.g. {sex.capitalize()}).
+3. Use the provided medical reference chunks to populate the CLINICAL INDICATION, TECHNIQUE, FINDINGS, IMPRESSION, and RECOMMENDATION sections. Make the report detailed, professional, and clinically accurate.
+4. Output ONLY the report inside the '---' borders. Do not write any conversational preamble or postscript.
+"""
 
-def compute_cosine_similarity(vec_a: list, vec_b: list) -> float:
-    """Computes the cosine similarity between two numeric vectors."""
-    a = np.array(vec_a, dtype=np.float32)
-    b = np.array(vec_b, dtype=np.float32)
+    context_str = "\n\n".join([
+        f"### Section: {c['section']}\nSource: {c['source']}\nContent: {c['content']}"
+        for c in top_chunks
+    ])
     
-    norm_a = np.linalg.norm(a)
-    norm_b = np.linalg.norm(b)
+    user_content = f"Medical Reference Context Chunks:\n\n{context_str}\n\nPatient Clinical Details:\n- Diagnosis: {disease_name}\n- Symptoms: {symptoms or 'N/A'}\n- Age: {age}\n- Sex: {sex.capitalize()}"
     
-    if norm_a == 0 or norm_b == 0:
-        return 0.0
+    # 5. Invoke LLM (trying the requested model, with fallbacks if needed)
+    models_to_try = [
+        "gemini-1.5-flash",
+        "gemini-2.5-flash",
+        "gemini-2.0-flash-exp",
+        "gemini-pro"
+    ]
+    if llm_model and llm_model not in models_to_try:
+        models_to_try.insert(0, llm_model)
         
-    return float(np.dot(a, b) / (norm_a * norm_b))
-
-def generate_radiology_report(
-    disease_name: str, 
-    patient_metadata: dict, 
-    llm_model: str = "gemini-3.5-flash"
-) -> str:
-    """Orchestrates the RAG query pipeline using Upstash Redis and Gemini API."""
-    name = patient_metadata.get("name", "Unknown")
-    age = patient_metadata.get("age", "Unknown")
-    sex = patient_metadata.get("sex", "Unknown")
-    symptoms = patient_metadata.get("symptoms", "None reported")
-    date_str = patient_metadata.get("date", datetime.date.today().isoformat())
-
-    # 1. Cache Check
-    print(f"Checking Upstash cache for {disease_name} (Age: {age}, Sex: {sex})...")
-    cached_report = get_cached_report(disease_name, age, sex)
-    if cached_report:
-        print("🎉 Cache hit! Returning cached report.")
-        # Update name and date placeholders dynamically
-        updated_report = cached_report.replace("{name}", name).replace("{date}", date_str)
-        return updated_report
-
-    print("Cache miss. Retrieving disease chunks from Upstash Redis...")
-    # Fetch all stored sections for the specified disease
-    chunks = get_disease_chunks(disease_name)
-    if not chunks:
-        return f"Error: No reference documents found for the disease '{disease_name}' in Upstash Redis."
-
-    # 2. Embed the query disease_name to compare vectors
-    api_key = get_gemini_api_key()
-    if not api_key:
-        raise ValueError("No GEMINI_API_KEYS are configured in .env. Cannot run query pipeline.")
-
-    print(f"Embedding query disease name with Gemini: '{disease_name}'...")
-    genai.configure(api_key=api_key)
+    llm_report_template = ""
+    last_err = None
     
-    embed_response = genai.embed_content(
-         model="models/gemini-embedding-001",
-         content=disease_name
-    )
-    query_embedding = embed_response["embedding"]
-
-    # 3. Compute in-memory cosine similarity using NumPy
-    print(f"Computing vector similarity for {len(chunks)} sections...")
-    scored_chunks = []
-    for chunk in chunks:
-        stored_emb = chunk.get("embedding")
-        if stored_emb:
-            similarity = compute_cosine_similarity(query_embedding, stored_emb)
-            scored_chunks.append((similarity, chunk))
-        else:
-            scored_chunks.append((0.0, chunk))
-
-    # Sort chunks by similarity score descending
-    scored_chunks.sort(key=lambda x: x[0], reverse=True)
-
-    # Take top-5 most similar chunks
-    top_scored_chunks = scored_chunks[:5]
-    print("Top matches retrieved:")
-    for score, chunk in top_scored_chunks:
-        print(f" - [{chunk['section']}] Similarity: {score:.4f}")
-
-    # 4. Concatenate retrieved context
-    retrieved_context = ""
-    for idx, (score, chunk) in enumerate(top_scored_chunks):
-        retrieved_context += f"--- Context Chunk {idx+1} (Section: {chunk['section']}, Source: {chunk['source']}) ---\n"
-        retrieved_context += f"{chunk['content']}\n\n"
-
-    # 5. Format Prompts with actual name and date so LLM writes them correctly
-    formatted_system_prompt = SYSTEM_PROMPT.format(
-        name=name,
-        age=age,
-        sex=sex,
-        date=date_str
-    )
-
-    user_message = f"""Disease: {disease_name}
-Patient Age: {age}
-Patient Sex: {sex}
-Symptoms: {symptoms}
-
-Research Reference Context:
-{retrieved_context}"""
-
-    # 6. Call Gemini LLM
-    print(f"Calling Gemini model {llm_model}...")
-    model = genai.GenerativeModel(
-        model_name=llm_model,
-        system_instruction=formatted_system_prompt
-    )
+    for m in models_to_try:
+        try:
+            logger.info(f"Invoking Gemini model '{m}' for report generation...")
+            model = genai.GenerativeModel(
+                model_name=m,
+                system_instruction=system_prompt
+            )
+            response = call_gemini_with_retry(model.generate_content, user_content)
+            llm_report_template = response.text
+            if llm_report_template:
+                break
+        except Exception as e:
+            logger.warning(f"LLM generation failed with model '{m}': {e}")
+            last_err = e
+            
+    if not llm_report_template:
+        raise last_err or RuntimeError("Failed to generate radiology report with any Gemini model")
+        
+    # Clean up output formatting if LLM wrapped in code block
+    llm_report_template = llm_report_template.strip()
+    if llm_report_template.startswith("```"):
+        llm_report_template = re.sub(r'^```[a-zA-Z]*\n', '', llm_report_template)
+        llm_report_template = re.sub(r'\n```$', '', llm_report_template).strip()
+        
+    # 6. Cache the generated template in Upstash Redis
+    redis_client.set(cache_key, llm_report_template)
+    logger.info(f"Cached generated report template under key: {cache_key}")
     
-    response = model.generate_content(
-        user_message,
-        generation_config={"temperature": 0.1}
-    )
+    # 7. Perform final replacements and return
+    report_text = llm_report_template.replace("{name}", patient_name)
+    report_text = report_text.replace("{date}", current_date)
+    report_text = report_text.replace("{age}", str(age))
+    report_text = report_text.replace("{sex}", sex.capitalize())
     
-    report_output = response.text
-
-    # 7. Store template in cache (retaining literal placeholders)
-    print("Caching generated report template in Redis...")
-    cache_template = report_output.replace(name, "{name}").replace(date_str, "{date}")
-    set_cached_report(disease_name, age, sex, cache_template)
-
-    return report_output
+    return report_text

@@ -1,3 +1,4 @@
+extern crate image as img_crate;
 use printpdf::*;
 use std::fs::File;
 use std::io::{self, Read, BufWriter};
@@ -10,6 +11,9 @@ struct RadiologyReport {
     date: String,
     referring_physician: String,
     report_id: String,
+    patient_id: String,
+    study_date: String,
+    modality: String,
     clinical_indication: String,
     technique: String,
     findings: String,
@@ -26,8 +30,9 @@ fn pt(x: f32, y: f32) -> (Point, bool) {
 }
 
 fn wrap_text(text: &str, max_width_points: f32, font_size: f32, is_bold: bool) -> Vec<String> {
-    let avg_char_width = if is_bold { 0.45 } else { 0.40 } * font_size;
-    let max_chars_per_line = (max_width_points / avg_char_width).floor() as usize;
+    // Use a slightly conservative char-width estimate so text stays within bounds.
+    let avg_char_width = if is_bold { 0.52 } else { 0.48 } * font_size;
+    let max_chars_per_line = ((max_width_points / avg_char_width).floor() as usize).max(1);
 
     let mut lines = Vec::new();
     for paragraph in text.split('\n') {
@@ -37,14 +42,29 @@ fn wrap_text(text: &str, max_width_points: f32, font_size: f32, is_bold: bool) -
         }
         let mut current_line = String::new();
         for word in p_trimmed.split_whitespace() {
+            // Hard-break words that are longer than the entire line width.
+            let mut remaining = word;
+            while remaining.len() > max_chars_per_line {
+                let split_at = max_chars_per_line.saturating_sub(1);
+                if !current_line.is_empty() {
+                    lines.push(current_line.clone());
+                    current_line.clear();
+                }
+                current_line.push_str(&remaining[..split_at]);
+                current_line.push('-');
+                lines.push(current_line.clone());
+                current_line.clear();
+                remaining = &remaining[split_at..];
+            }
+            let chunk = remaining;
             if current_line.is_empty() {
-                current_line = word.to_string();
-            } else if current_line.len() + 1 + word.len() <= max_chars_per_line {
+                current_line = chunk.to_string();
+            } else if current_line.len() + 1 + chunk.len() <= max_chars_per_line {
                 current_line.push(' ');
-                current_line.push_str(word);
+                current_line.push_str(chunk);
             } else {
-                lines.push(current_line);
-                current_line = word.to_string();
+                lines.push(current_line.clone());
+                current_line = chunk.to_string();
             }
         }
         if !current_line.is_empty() {
@@ -52,6 +72,23 @@ fn wrap_text(text: &str, max_width_points: f32, font_size: f32, is_bold: bool) -
         }
     }
     lines
+}
+
+/// Truncate a string to at most `max_chars` characters, appending "…" if trimmed.
+fn truncate_text(text: &str, max_width_points: f32, font_size: f32) -> String {
+    let avg_char_width = 0.48 * font_size;
+    let max_chars = ((max_width_points / avg_char_width).floor() as usize).max(1);
+    if text.len() <= max_chars {
+        text.to_string()
+    } else {
+        // Back off by 1 to leave room for the ellipsis
+        let trimmed = &text[..max_chars.saturating_sub(1)];
+        format!("{}…", trimmed.trim_end())
+    }
+}
+
+fn clean_markdown(s: &str) -> String {
+    s.replace("**", "").replace("*", "")
 }
 
 fn parse_report(content: &str) -> RadiologyReport {
@@ -62,8 +99,11 @@ fn parse_report(content: &str) -> RadiologyReport {
     report.patient_age = "Unknown".to_string();
     report.patient_sex = "Unknown".to_string();
     report.date = "Unknown".to_string();
-    report.referring_physician = "Dr. A. Sharma".to_string();
+    report.referring_physician = "Dr. Tarun Ahuja, MD".to_string();
     report.report_id = "RAD-00142".to_string();
+    report.patient_id = "Unknown".to_string();
+    report.study_date = "Unknown".to_string();
+    report.modality = "MRI (3T)".to_string();
 
     let mut current_section = "";
     let mut clinical_lines = Vec::new();
@@ -112,23 +152,23 @@ fn parse_report(content: &str) -> RadiologyReport {
             continue;
         }
 
-        let upper = trimmed.to_uppercase();
-        if upper.contains("CLINICAL INDICATION") {
+        let clean_upper = trimmed.replace('*', "").replace('#', "").replace(':', "").trim().to_uppercase();
+        if clean_upper == "CLINICAL INDICATION" {
             current_section = "clinical";
             continue;
-        } else if upper.contains("TECHNIQUE") {
+        } else if clean_upper == "TECHNIQUE" {
             current_section = "technique";
             continue;
-        } else if upper.contains("FINDINGS") {
+        } else if clean_upper == "FINDINGS" {
             current_section = "findings";
             continue;
-        } else if upper.contains("IMPRESSION") {
+        } else if clean_upper == "IMPRESSION" {
             current_section = "impression";
             continue;
-        } else if upper.contains("RECOMMENDATION") {
+        } else if clean_upper == "RECOMMENDATION" {
             current_section = "recommendation";
             continue;
-        } else if upper.starts_with("---") || upper.starts_with("RADIOLOGY REPORT") {
+        } else if clean_upper.starts_with("---") || clean_upper.starts_with("RADIOLOGY REPORT") {
             continue;
         }
 
@@ -142,10 +182,10 @@ fn parse_report(content: &str) -> RadiologyReport {
         }
     }
 
-    report.clinical_indication = clinical_lines.join(" ");
-    report.technique = technique_lines.join(" ");
-    report.findings = findings_lines.join(" ");
-    report.recommendation = recommendation_lines.join(" ");
+    report.clinical_indication = clinical_lines.join("\n");
+    report.technique = technique_lines.join("\n");
+    report.findings = findings_lines.join("\n");
+    report.recommendation = recommendation_lines.join("\n");
 
     // Clean impression numbered list lines
     for line in impression_lines {
@@ -161,8 +201,9 @@ fn parse_report(content: &str) -> RadiologyReport {
         } else {
             clean_trimmed.to_string()
         };
-        if !final_line.is_empty() {
-            report.impression.push(final_line);
+        let final_cleaned = final_line;
+        if !final_cleaned.is_empty() {
+            report.impression.push(final_cleaned);
         }
     }
 
@@ -217,103 +258,257 @@ fn draw_section_header(
     draw_line(layer, 40.0, y - 4.0, 555.0, y - 4.0, 1.5, 24.0/255.0, 95.0/255.0, 165.0/255.0);
 }
 
-fn draw_text_block(
+fn draw_rich_text_line(
     layer: &PdfLayerReference,
-    font: &IndirectFontRef,
     text: &str,
-    start_y: f32,
-    line_height: f32,
-    font_size: f32,
-    max_width: f32,
-) -> f32 {
-    let lines = wrap_text(text, max_width, font_size, false);
+    font_regular: &IndirectFontRef,
+    font_bold: &IndirectFontRef,
+    size: f32,
+    x: f32,
+    y: f32,
+    r: f32,
+    g: f32,
+    b: f32,
+) {
+    layer.begin_text_section();
+    layer.set_fill_color(Color::Rgb(Rgb::new(r, g, b, None)));
+    layer.set_text_cursor(mm(x), mm(y));
     
-    let mut current_y = start_y;
-    for line in lines {
-        // Black: #042C53 (4, 44, 83)
-        draw_text_line(layer, &line, font, font_size, 40.0, current_y, 4.0/255.0, 44.0/255.0, 83.0/255.0);
-        current_y -= line_height;
+    let parts = text.split("**");
+    for (idx, part) in parts.enumerate() {
+        let is_bold = idx % 2 == 1;
+        let font = if is_bold { font_bold } else { font_regular };
+        layer.set_font(font, size);
+        let cleaned_part = part.replace("*", "");
+        layer.write_text(&cleaned_part, font);
     }
-    current_y
+    layer.end_text_section();
+}
+
+fn draw_formatted_text_block(
+    state: &mut DocState,
+    report: &RadiologyReport,
+    text: &str,
+    max_width: f32,
+    font_size: f32,
+    line_height: f32,
+) {
+    for paragraph in text.split('\n') {
+        let p_trimmed = paragraph.trim();
+        if p_trimmed.is_empty() {
+            state.y_cursor -= 4.0;
+            continue;
+        }
+
+        let mut prefix = "";
+        let mut rest = p_trimmed;
+        let mut is_list = false;
+
+        if p_trimmed.starts_with("- ") {
+            prefix = "• ";
+            rest = &p_trimmed[2..];
+            is_list = true;
+        } else if p_trimmed.starts_with("* ") {
+            prefix = "• ";
+            rest = &p_trimmed[2..];
+            is_list = true;
+        } else if p_trimmed.starts_with("• ") {
+            prefix = "• ";
+            rest = &p_trimmed[2..];
+            is_list = true;
+        } else if let Some(idx) = p_trimmed.find('.') {
+            if idx > 0 && idx < 3 {
+                let num_str = &p_trimmed[..idx];
+                if num_str.chars().all(|c| c.is_ascii_digit()) {
+                    prefix = &p_trimmed[..idx + 2];
+                    rest = &p_trimmed[idx + 1..].trim();
+                    is_list = true;
+                }
+            }
+        }
+
+        // List items: bullet at x=42, text at x=55 — shrink width by 15 to match indent
+        let (x_start, width_limit) = if is_list {
+            (55.0, max_width - 15.0)
+        } else {
+            (40.0, max_width)
+        };
+
+        let lines = wrap_text(rest, width_limit, font_size, false);
+
+        for (line_idx, line) in lines.iter().enumerate() {
+            state.ensure_space(line_height + 4.0, report);
+
+            let layer = state.current_layer();
+
+            if line_idx == 0 && is_list {
+                draw_rich_text_line(
+                    &layer,
+                    prefix,
+                    &state.font_regular,
+                    &state.font_bold,
+                    font_size,
+                    42.0,
+                    state.y_cursor,
+                    24.0/255.0, 95.0/255.0, 165.0/255.0
+                );
+            }
+
+            draw_rich_text_line(
+                &layer,
+                line,
+                &state.font_regular,
+                &state.font_bold,
+                font_size,
+                x_start,
+                state.y_cursor,
+                4.0/255.0, 44.0/255.0, 83.0/255.0
+            );
+
+            state.y_cursor -= line_height;
+        }
+    }
 }
 
 fn draw_standard_section(
-    layer: &PdfLayerReference,
-    font_regular: &IndirectFontRef,
-    font_bold: &IndirectFontRef,
+    state: &mut DocState,
+    report: &RadiologyReport,
     label: &str,
     text: &str,
-    start_y: f32,
     max_width: f32,
-) -> f32 {
-    draw_section_header(layer, font_bold, label, start_y);
-    let text_start_y = start_y - 20.0;
-    let end_y = draw_text_block(layer, font_regular, text, text_start_y, 16.0, 13.0, max_width);
-    end_y
+) {
+    state.ensure_space(25.0, report);
+    draw_section_header(&state.current_layer(), &state.font_bold, label, state.y_cursor);
+    state.y_cursor -= 20.0;
+    draw_formatted_text_block(state, report, text, max_width, 13.0, 16.0);
+}
+
+fn draw_image_at(
+    layer: &PdfLayerReference,
+    image_path: &str,
+    x: f32,
+    y: f32,
+    width_pt: f32,
+    height_pt: f32,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use std::fs::File;
+    use std::io::BufReader;
+    use img_crate::codecs::png::PngDecoder;
+
+    let img = img_crate::open(image_path)?;
+    let w_px = img.width() as f32;
+    let h_px = img.height() as f32;
+
+    let file = File::open(image_path)?;
+    let reader = BufReader::new(file);
+    let decoder = PngDecoder::new(reader)?;
+    let xobject = ImageXObject::try_from(decoder)?;
+    let image = Image::from(xobject);
+
+    image.add_to_layer(
+        layer.clone(),
+        ImageTransform {
+            translate_x: Some(Mm(x * 0.352778)),
+            translate_y: Some(Mm((y - height_pt) * 0.352778)),
+            rotate: None,
+            scale_x: Some(width_pt / w_px),
+            scale_y: Some(height_pt / h_px),
+            dpi: Some(72.0),
+        },
+    );
+    Ok(())
 }
 
 fn draw_imaging_section(
     layer: &PdfLayerReference,
     font_regular: &IndirectFontRef,
     font_bold: &IndirectFontRef,
+    mri_path: Option<&str>,
+    kspace_path: Option<&str>,
     start_y: f32,
     _max_width: f32,
 ) -> f32 {
     draw_section_header(layer, font_bold, "Imaging", start_y);
     let box_top = start_y - 12.0;
-    let box_height = 140.0;
-    let box_bottom = box_top - box_height;
-    
-    // Draw background (Light blue: #E6F1FB)
-    draw_rect_filled(layer, 40.0, box_bottom, 515.0, box_height, 230.0/255.0, 241.0/255.0, 251.0/255.0);
 
-    // Draw dashed border (#85B7EB -> 133, 183, 235)
-    layer.set_outline_color(Color::Rgb(Rgb::new(133.0 / 255.0, 183.0 / 255.0, 235.0 / 255.0, None)));
-    layer.set_outline_thickness(1.5);
-    
-    let dash_pattern = LineDashPattern {
-        offset: 0,
-        dash_1: Some(4),
-        gap_1: Some(4),
-        dash_2: None,
-        gap_2: None,
-        dash_3: None,
-        gap_3: None,
-    };
-    layer.set_line_dash_pattern(dash_pattern);
-    
-    let border_points = vec![
-        pt(40.0, box_bottom),
-        pt(555.0, box_bottom),
-        pt(555.0, box_top),
-        pt(40.0, box_top),
-    ];
-    layer.add_polygon(Polygon {
-        rings: vec![border_points],
-        mode: printpdf::path::PaintMode::Stroke,
-        winding_order: printpdf::path::WindingOrder::NonZero,
-    });
-    
-    // Restore solid line
-    layer.set_line_dash_pattern(LineDashPattern {
-        offset: 0,
-        dash_1: None,
-        gap_1: None,
-        dash_2: None,
-        gap_2: None,
-        dash_3: None,
-        gap_3: None,
-    });
+    let mut mri_drawn = false;
+    let mut kspace_drawn = false;
 
-    // Write text placeholders centered inside the box
-    // Icon placeholder
-    draw_text_line(layer, "[o]", font_bold, 20.0, 280.0, box_top - 50.0, 55.0/255.0, 138.0/255.0, 221.0/255.0);
-    // "MRI scan image"
-    draw_text_line(layer, "MRI scan image", font_bold, 12.0, 245.0, box_top - 80.0, 24.0/255.0, 95.0/255.0, 165.0/255.0);
-    // "Image will be inserted here"
-    draw_text_line(layer, "Image will be inserted here", font_regular, 11.0, 215.0, box_top - 105.0, 55.0/255.0, 138.0/255.0, 221.0/255.0);
+    if let Some(mri) = mri_path {
+        if draw_image_at(layer, mri, 40.0, box_top, 250.0, 250.0).is_ok() {
+            draw_text_line(layer, "Reconstructed MRI Slice (Middle)", font_bold, 9.5, 40.0, box_top - 262.0, 4.0/255.0, 44.0/255.0, 83.0/255.0);
+            mri_drawn = true;
+        }
+    }
 
-    box_bottom
+    if let Some(kspace) = kspace_path {
+        if draw_image_at(layer, kspace, 305.0, box_top, 250.0, 250.0).is_ok() {
+            draw_text_line(layer, "K-Space Log-Magnitude (Middle)", font_bold, 9.5, 305.0, box_top - 262.0, 4.0/255.0, 44.0/255.0, 83.0/255.0);
+            kspace_drawn = true;
+        }
+    }
+
+    // Draw placeholder for MRI if missing but K-space is drawn
+    if !mri_drawn && kspace_drawn {
+        draw_rect_filled(layer, 40.0, box_top - 250.0, 250.0, 250.0, 240.0/255.0, 244.0/255.0, 248.0/255.0);
+        draw_text_line(layer, "[MRI Image Missing]", font_bold, 10.0, 110.0, box_top - 125.0, 24.0/255.0, 95.0/255.0, 165.0/255.0);
+    }
+
+    // Draw placeholder for K-space if missing but MRI is drawn
+    if mri_drawn && !kspace_drawn {
+        draw_rect_filled(layer, 305.0, box_top - 250.0, 250.0, 250.0, 240.0/255.0, 244.0/255.0, 248.0/255.0);
+        draw_text_line(layer, "[K-Space Image Missing]", font_bold, 10.0, 375.0, box_top - 125.0, 24.0/255.0, 95.0/255.0, 165.0/255.0);
+    }
+
+    if mri_drawn || kspace_drawn {
+        box_top - 280.0
+    } else {
+        let placeholder_height = 140.0;
+        let placeholder_bottom = box_top - placeholder_height;
+        draw_rect_filled(layer, 40.0, placeholder_bottom, 515.0, placeholder_height, 230.0/255.0, 241.0/255.0, 251.0/255.0);
+
+        layer.set_outline_color(Color::Rgb(Rgb::new(133.0 / 255.0, 183.0 / 255.0, 235.0 / 255.0, None)));
+        layer.set_outline_thickness(1.5);
+        
+        let dash_pattern = LineDashPattern {
+            offset: 0,
+            dash_1: Some(4),
+            gap_1: Some(4),
+            dash_2: None,
+            gap_2: None,
+            dash_3: None,
+            gap_3: None,
+        };
+        layer.set_line_dash_pattern(dash_pattern);
+        
+        let border_points = vec![
+            pt(40.0, placeholder_bottom),
+            pt(555.0, placeholder_bottom),
+            pt(555.0, box_top),
+            pt(40.0, box_top),
+        ];
+        layer.add_polygon(Polygon {
+            rings: vec![border_points],
+            mode: printpdf::path::PaintMode::Stroke,
+            winding_order: printpdf::path::WindingOrder::NonZero,
+        });
+        
+        layer.set_line_dash_pattern(LineDashPattern {
+            offset: 0,
+            dash_1: None,
+            gap_1: None,
+            dash_2: None,
+            gap_2: None,
+            dash_3: None,
+            gap_3: None,
+        });
+
+        draw_text_line(layer, "[o]", font_bold, 20.0, 280.0, box_top - 50.0, 55.0/255.0, 138.0/255.0, 221.0/255.0);
+        draw_text_line(layer, "MRI scan image", font_bold, 12.0, 245.0, box_top - 80.0, 24.0/255.0, 95.0/255.0, 165.0/255.0);
+        draw_text_line(layer, "Image will be inserted here", font_regular, 11.0, 215.0, box_top - 105.0, 55.0/255.0, 138.0/255.0, 221.0/255.0);
+
+        placeholder_bottom
+    }
 }
 
 fn draw_impression_section(
@@ -357,7 +552,7 @@ fn draw_impression_section(
     let mut current_y = box_top - text_margin - 11.0;
     for lines in wrapped_items {
         for line in lines {
-            draw_text_line(layer, &line, font_regular, 13.0, list_x, current_y, 4.0/255.0, 44.0/255.0, 83.0/255.0);
+            draw_rich_text_line(layer, &line, font_regular, font_bold, 13.0, list_x, current_y, 4.0/255.0, 44.0/255.0, 83.0/255.0);
             current_y -= line_height;
         }
         current_y -= spacing_between_items;
@@ -421,7 +616,7 @@ impl DocState {
         draw_rect_filled(&layer, 40.0, self.y_cursor - 40.0, 515.0, 40.0, 12.0/255.0, 68.0/255.0, 124.0/255.0);
 
         // Left text
-        draw_text_line(&layer, "Radiology Report (Continued)", &self.font_bold, 11.0, 55.0, self.y_cursor - 25.0, 1.0, 1.0, 1.0);
+        draw_text_line(&layer, "KVISION // Clinical Imaging Report (Continued)", &self.font_bold, 11.0, 55.0, self.y_cursor - 25.0, 1.0, 1.0, 1.0);
         
         self.y_cursor -= 40.0;
     }
@@ -443,6 +638,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut physician_override: Option<String> = None;
     let mut id_override: Option<String> = None;
     let mut date_override: Option<String> = None;
+    let mut mri_override: Option<String> = None;
+    let mut kspace_override: Option<String> = None;
+    let mut patient_id_override: Option<String> = None;
+    let mut study_date_override: Option<String> = None;
+    let mut modality_override: Option<String> = None;
 
     let mut i = 1;
     while i < args.len() {
@@ -501,6 +701,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     i += 2;
                 }
             }
+            "--mri" => {
+                if i + 1 < args.len() {
+                    mri_override = Some(args[i + 1].clone());
+                    i += 2;
+                }
+            }
+            "--kspace" => {
+                if i + 1 < args.len() {
+                    kspace_override = Some(args[i + 1].clone());
+                    i += 2;
+                }
+            }
+            "--patient-id" => {
+                if i + 1 < args.len() {
+                    patient_id_override = Some(args[i + 1].clone());
+                    i += 2;
+                }
+            }
+            "--study-date" => {
+                if i + 1 < args.len() {
+                    study_date_override = Some(args[i + 1].clone());
+                    i += 2;
+                }
+            }
+            "--modality" => {
+                if i + 1 < args.len() {
+                    modality_override = Some(args[i + 1].clone());
+                    i += 2;
+                }
+            }
             _ => {
                 if input_path.is_empty() {
                     input_path = args[i].clone();
@@ -535,6 +765,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(p) = physician_override { report.referring_physician = p; }
     if let Some(id) = id_override { report.report_id = id; }
     if let Some(d) = date_override { report.date = d; }
+    if let Some(pid) = patient_id_override { report.patient_id = pid; }
+    if let Some(sd) = study_date_override { report.study_date = sd; }
+    if let Some(m) = modality_override { report.modality = m; }
 
     // Initialize printpdf Document
     // Mm(210.0) x Mm(297.0) is standard A4 size
@@ -564,92 +797,121 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. Draw HEADER BAR on Page 1
     {
         let layer = state.current_layer();
-        // Background: Primary blue #0C447C (12, 68, 124)
-        draw_rect_filled(&layer, 40.0, 742.0, 515.0, 60.0, 12.0/255.0, 68.0/255.0, 124.0/255.0);
+        // Left text:
+        draw_text_line(&layer, "KVISION // CLINICAL IMAGING CENTER", &state.font_bold, 14.0, 40.0, 775.0, 12.0/255.0, 68.0/255.0, 124.0/255.0);
+        draw_text_line(&layer, "MAGNETOM TRIO 3T MRI WORKSTATION", &state.font_regular, 8.5, 40.0, 760.0, 74.0/255.0, 85.0/255.0, 104.0/255.0);
 
-        // Header Text
-        draw_text_line(&layer, "Radiology Report", &state.font_bold, 14.0, 55.0, 775.0, 1.0, 1.0, 1.0);
-        draw_text_line(&layer, "AI-assisted diagnostic report", &state.font_regular, 9.0, 55.0, 758.0, 1.0, 1.0, 1.0);
-        draw_text_line(&layer, &format!("Date: {}", report.date), &state.font_regular, 10.0, 440.0, 775.0, 1.0, 1.0, 1.0);
-        draw_text_line(&layer, &format!("Report ID: {}", report.report_id), &state.font_regular, 10.0, 440.0, 758.0, 1.0, 1.0, 1.0);
+        // Right text:
+        draw_text_line(&layer, "123 Health Ave, Suite 400", &state.font_regular, 8.5, 455.0, 778.0, 74.0/255.0, 85.0/255.0, 104.0/255.0);
+        draw_text_line(&layer, "Phone: (555) 019-2834", &state.font_regular, 8.5, 471.0, 766.0, 74.0/255.0, 85.0/255.0, 104.0/255.0);
+        draw_text_line(&layer, "reports@kvision.ai", &state.font_regular, 8.5, 485.0, 754.0, 74.0/255.0, 85.0/255.0, 104.0/255.0);
+
+        // Thin separator line
+        draw_line(&layer, 40.0, 746.0, 555.0, 746.0, 1.0, 12.0/255.0, 68.0/255.0, 124.0/255.0);
     }
     
-    // 2. Draw PATIENT BAR on Page 1
+    // 2. Draw Patient Info Table on Page 1
     {
         let layer = state.current_layer();
-        // Light blue background (#E6F1FB)
-        draw_rect_filled(&layer, 40.0, 697.0, 515.0, 35.0, 230.0/255.0, 241.0/255.0, 251.0/255.0);
+        let table_top = 730.0;
+        let row_height = 20.0;
 
-        // Accent border (3px solid #185FA5)
-        draw_rect_filled(&layer, 40.0, 697.0, 3.0, 35.0, 24.0/255.0, 95.0/255.0, 165.0/255.0);
+        // Fill background for Label columns
+        for r in 0..4 {
+            let y_top = table_top - (r as f32) * row_height;
+            let y_bottom = y_top - row_height;
+            // Col 1 label
+            draw_rect_filled(&layer, 40.0, y_bottom, 95.0, row_height, 240.0/255.0, 244.0/255.0, 248.0/255.0);
+            // Col 2 label
+            draw_rect_filled(&layer, 285.0, y_bottom, 110.0, row_height, 240.0/255.0, 244.0/255.0, 248.0/255.0);
+        }
 
-        // Col 1: Patient name
-        draw_text_line(&layer, "Patient name", &state.font_regular, 8.5, 55.0, 719.0, 24.0/255.0, 95.0/255.0, 165.0/255.0);
-        draw_text_line(&layer, &report.patient_name, &state.font_bold, 10.5, 55.0, 705.0, 4.0/255.0, 44.0/255.0, 83.0/255.0);
+        // Draw horizontal grid lines
+        for r in 0..=4 {
+            let y = table_top - (r as f32) * row_height;
+            draw_line(&layer, 40.0, y, 555.0, y, 0.75, 200.0/255.0, 210.0/255.0, 220.0/255.0);
+        }
 
-        // Col 2: Age / Sex
-        draw_text_line(&layer, "Age / Sex", &state.font_regular, 8.5, 220.0, 719.0, 24.0/255.0, 95.0/255.0, 165.0/255.0);
+        // Draw vertical grid lines
+        let x_coords = [40.0, 135.0, 285.0, 395.0, 555.0];
+        for x in x_coords {
+            draw_line(&layer, x, table_top - 80.0, x, table_top, 0.75, 200.0/255.0, 210.0/255.0, 220.0/255.0);
+        }
+
+        // Column value-cell widths (available space between value start and next border)
+        // Col-1 value: 141 → 285  = 144pt; Col-2 value: 401 → 555 = 154pt
+        let col1_val_w = 138.0_f32;  // 141..285 with 6pt right padding
+        let col2_val_w = 148.0_f32;  // 401..555 with 6pt right padding
+
+        // Row 0
+        let y0 = table_top - 1.0 * row_height + 5.5;
+        draw_text_line(&layer, "Patient Name:", &state.font_bold, 9.0, 46.0, y0, 4.0/255.0, 44.0/255.0, 83.0/255.0);
+        draw_text_line(&layer, &truncate_text(&report.patient_name, col1_val_w, 9.0), &state.font_regular, 9.0, 141.0, y0, 4.0/255.0, 44.0/255.0, 83.0/255.0);
+        draw_text_line(&layer, "Referring Physician:", &state.font_bold, 9.0, 291.0, y0, 4.0/255.0, 44.0/255.0, 83.0/255.0);
+        draw_text_line(&layer, &truncate_text(&report.referring_physician, col2_val_w, 9.0), &state.font_regular, 9.0, 401.0, y0, 4.0/255.0, 44.0/255.0, 83.0/255.0);
+
+        // Row 1
+        let y1 = table_top - 2.0 * row_height + 5.5;
+        draw_text_line(&layer, "Patient ID:", &state.font_bold, 9.0, 46.0, y1, 4.0/255.0, 44.0/255.0, 83.0/255.0);
+        draw_text_line(&layer, &truncate_text(&report.patient_id, col1_val_w, 9.0), &state.font_regular, 9.0, 141.0, y1, 4.0/255.0, 44.0/255.0, 83.0/255.0);
+        draw_text_line(&layer, "Modality:", &state.font_bold, 9.0, 291.0, y1, 4.0/255.0, 44.0/255.0, 83.0/255.0);
+        draw_text_line(&layer, &truncate_text(&report.modality, col2_val_w, 9.0), &state.font_regular, 9.0, 401.0, y1, 4.0/255.0, 44.0/255.0, 83.0/255.0);
+
+        // Row 2
+        let y2 = table_top - 3.0 * row_height + 5.5;
+        draw_text_line(&layer, "Age / Gender:", &state.font_bold, 9.0, 46.0, y2, 4.0/255.0, 44.0/255.0, 83.0/255.0);
         let age_sex = format!("{} / {}", report.patient_age, report.patient_sex);
-        draw_text_line(&layer, &age_sex, &state.font_bold, 10.5, 220.0, 705.0, 4.0/255.0, 44.0/255.0, 83.0/255.0);
+        draw_text_line(&layer, &truncate_text(&age_sex, col1_val_w, 9.0), &state.font_regular, 9.0, 141.0, y2, 4.0/255.0, 44.0/255.0, 83.0/255.0);
+        draw_text_line(&layer, "Date of Study:", &state.font_bold, 9.0, 291.0, y2, 4.0/255.0, 44.0/255.0, 83.0/255.0);
+        draw_text_line(&layer, &truncate_text(&report.study_date, col2_val_w, 9.0), &state.font_regular, 9.0, 401.0, y2, 4.0/255.0, 44.0/255.0, 83.0/255.0);
 
-        // Col 3: Referring physician
-        draw_text_line(&layer, "Referring physician", &state.font_regular, 8.5, 385.0, 719.0, 24.0/255.0, 95.0/255.0, 165.0/255.0);
-        draw_text_line(&layer, &report.referring_physician, &state.font_bold, 10.5, 385.0, 705.0, 4.0/255.0, 44.0/255.0, 83.0/255.0);
+        // Row 3
+        let y3 = table_top - 4.0 * row_height + 5.5;
+        draw_text_line(&layer, "Report ID:", &state.font_bold, 9.0, 46.0, y3, 4.0/255.0, 44.0/255.0, 83.0/255.0);
+        draw_text_line(&layer, &truncate_text(&report.report_id, col1_val_w, 9.0), &state.font_regular, 9.0, 141.0, y3, 4.0/255.0, 44.0/255.0, 83.0/255.0);
+        draw_text_line(&layer, "Date of Report:", &state.font_bold, 9.0, 291.0, y3, 4.0/255.0, 44.0/255.0, 83.0/255.0);
+        draw_text_line(&layer, &truncate_text(&report.date, col2_val_w, 9.0), &state.font_regular, 9.0, 401.0, y3, 4.0/255.0, 44.0/255.0, 83.0/255.0);
     }
     
-    state.y_cursor = 675.0;
+    // 3. Draw centered bold title
+    {
+        let layer = state.current_layer();
+        // Above line
+        draw_line(&layer, 40.0, 634.0, 555.0, 634.0, 0.5, 200.0/255.0, 210.0/255.0, 220.0/255.0);
+        // Title Text
+        draw_text_line(&layer, "MAGNETIC RESONANCE IMAGING (MRI) BRAIN REPORT", &state.font_bold, 11.0, 160.0, 621.0, 12.0/255.0, 68.0/255.0, 124.0/255.0);
+        // Below line
+        draw_line(&layer, 40.0, 614.0, 555.0, 614.0, 0.5, 200.0/255.0, 210.0/255.0, 220.0/255.0);
+    }
+
+    state.y_cursor = 595.0;
 
     // 3. Draw BODY SECTIONS dynamically
     
     // a. Clinical indication
-    let height_a = estimate_standard_section_height(&report.clinical_indication, 515.0, 13.0, 16.0);
-    state.ensure_space(height_a, &report);
-    state.y_cursor = draw_standard_section(
-        &state.current_layer(),
-        &state.font_regular,
-        &state.font_bold,
-        "Clinical Indication",
-        &report.clinical_indication,
-        state.y_cursor,
-        515.0,
-    ) - 15.0;
+    draw_standard_section(&mut state, &report, "Clinical Indication", &report.clinical_indication, 515.0);
+    state.y_cursor -= 15.0;
 
     // b. Technique
-    let height_b = estimate_standard_section_height(&report.technique, 515.0, 13.0, 16.0);
-    state.ensure_space(height_b, &report);
-    state.y_cursor = draw_standard_section(
-        &state.current_layer(),
-        &state.font_regular,
-        &state.font_bold,
-        "Technique",
-        &report.technique,
-        state.y_cursor,
-        515.0,
-    ) - 15.0;
+    draw_standard_section(&mut state, &report, "Technique", &report.technique, 515.0);
+    state.y_cursor -= 15.0;
 
     // c. Imaging
-    let height_c = 140.0 + 25.0;
+    let height_c = if mri_override.is_some() || kspace_override.is_some() { 285.0 } else { 165.0 };
     state.ensure_space(height_c, &report);
     state.y_cursor = draw_imaging_section(
         &state.current_layer(),
         &state.font_regular,
         &state.font_bold,
+        mri_override.as_deref(),
+        kspace_override.as_deref(),
         state.y_cursor,
         515.0,
     ) - 15.0;
 
     // d. Findings
-    let height_d = estimate_standard_section_height(&report.findings, 515.0, 13.0, 16.0);
-    state.ensure_space(height_d, &report);
-    state.y_cursor = draw_standard_section(
-        &state.current_layer(),
-        &state.font_regular,
-        &state.font_bold,
-        "Findings",
-        &report.findings,
-        state.y_cursor,
-        515.0,
-    ) - 15.0;
+    draw_standard_section(&mut state, &report, "Findings", &report.findings, 515.0);
+    state.y_cursor -= 15.0;
 
     // e. Impression
     let mut total_lines = 0;
@@ -673,17 +935,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ) - 15.0;
 
     // f. Recommendation
-    let height_f = estimate_standard_section_height(&report.recommendation, 515.0, 13.0, 16.0);
-    state.ensure_space(height_f, &report);
-    state.y_cursor = draw_standard_section(
-        &state.current_layer(),
-        &state.font_regular,
-        &state.font_bold,
-        "Recommendation",
-        &report.recommendation,
-        state.y_cursor,
-        515.0,
-    ) - 15.0;
+    draw_standard_section(&mut state, &report, "Recommendation", &report.recommendation, 515.0);
+    state.y_cursor -= 15.0;
 
     // 4. Draw FOOTER on the last page
     draw_footer(&state.current_layer(), &state.font_regular);

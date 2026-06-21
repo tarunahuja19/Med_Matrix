@@ -774,10 +774,69 @@ class GeneratePdfRequest(BaseModel):
     patient_metadata: dict = {}
     study_id: str | None = None
 
-def compile_pdf_with_rust(report_text: str, patient_metadata: dict) -> bytes:
+def generate_kspace_log_mag_npy(study_id: str) -> np.ndarray | None:
+    try:
+        # Find raw K-space key in MinIO kspace-raw
+        objects = minio_client.list_objects("kspace-raw", prefix=f"{study_id}/", recursive=True)
+        kspace_key = None
+        for obj in objects:
+            if "kspace_input" in obj.object_name:
+                kspace_key = obj.object_name
+                break
+        
+        if not kspace_key:
+            logger.warning(f"Could not find raw K-space for study {study_id} to generate log mag.")
+            return None
+            
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _, ext = os.path.splitext(kspace_key)
+            local_kspace_path = os.path.join(tmpdir, f"kspace{ext}")
+            minio_client.fget_object("kspace-raw", kspace_key, local_kspace_path)
+            
+            kspace = load_kspace(local_kspace_path)
+            
+            # Combine coils via RSS
+            if kspace.ndim == 4:
+                kspace_mag = np.sqrt(np.sum(np.abs(kspace)**2, axis=1))
+            elif kspace.ndim == 3:
+                kspace_mag = np.sqrt(np.sum(np.abs(kspace)**2, axis=0))
+                kspace_mag = kspace_mag[np.newaxis, ...]
+            else:
+                kspace_mag = np.abs(kspace)[np.newaxis, ...]
+                
+            kspace_log_mag = np.log(1.0 + kspace_mag)
+            
+            # Normalize per slice
+            for s in range(kspace_log_mag.shape[0]):
+                slice_min = kspace_log_mag[s].min()
+                slice_max = kspace_log_mag[s].max()
+                denom = slice_max - slice_min
+                if denom > 1e-8:
+                    kspace_log_mag[s] = (kspace_log_mag[s] - slice_min) / denom
+                else:
+                    kspace_log_mag[s] = np.zeros_like(kspace_log_mag[s])
+                    
+            # Upload to MinIO so it's cached for next time
+            local_log_mag_path = os.path.join(tmpdir, "kspace_log_mag.npy")
+            np.save(local_log_mag_path, kspace_log_mag)
+            
+            minio_client.fput_object(
+                bucket_name="reconstructed",
+                object_name=f"{study_id}/kspace_log_mag.npy",
+                file_path=local_log_mag_path
+            )
+            logger.info(f"Dynamically generated and uploaded kspace_log_mag.npy for study {study_id}")
+            return kspace_log_mag
+    except Exception as e:
+        logger.error(f"Failed to dynamically generate kspace log mag: {e}")
+        return None
+
+def compile_pdf_with_rust(report_text: str, patient_metadata: dict, study_id: str | None = None) -> bytes:
     import subprocess
     import tempfile
     import os
+    import numpy as np
+    from PIL import Image as PILImage
 
     binary_path = None
     possible_paths = [
@@ -794,14 +853,19 @@ def compile_pdf_with_rust(report_text: str, patient_metadata: dict) -> bytes:
     if not binary_path:
         raise FileNotFoundError("report_pdf Rust binary not found or not executable in search paths.")
 
-    with tempfile.NamedTemporaryFile(mode='w+', suffix='.txt', delete=False) as f_in:
-        f_in.write(report_text)
-        f_in_name = f_in.name
-
-    with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as f_out:
-        f_out_name = f_out.name
+    f_in_name = None
+    f_out_name = None
+    mri_png_path = None
+    kspace_png_path = None
 
     try:
+        with tempfile.NamedTemporaryFile(mode='w+', suffix='.txt', delete=False) as f_in:
+            f_in.write(report_text)
+            f_in_name = f_in.name
+
+        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as f_out:
+            f_out_name = f_out.name
+
         cmd = [binary_path, "--input", f_in_name, "--output", f_out_name]
         
         if "name" in patient_metadata:
@@ -814,8 +878,89 @@ def compile_pdf_with_rust(report_text: str, patient_metadata: dict) -> bytes:
             cmd.extend(["--physician", str(patient_metadata["physician"])])
         if "report_id" in patient_metadata:
             cmd.extend(["--id", str(patient_metadata["report_id"])])
+        if "patient_id" in patient_metadata:
+            cmd.extend(["--patient-id", str(patient_metadata["patient_id"])])
+        if "study_date" in patient_metadata:
+            cmd.extend(["--study-date", str(patient_metadata["study_date"])])
+        if "modality" in patient_metadata:
+            cmd.extend(["--modality", str(patient_metadata["modality"])])
         if "date" in patient_metadata:
             cmd.extend(["--date", str(patient_metadata["date"])])
+
+        if study_id and minio_client:
+            # 1. MRI reconstructed image
+            try:
+                with tempfile.NamedTemporaryFile(suffix='.npy', delete=False) as tmp_npy:
+                    tmp_npy_path = tmp_npy.name
+                
+                logger.info(f"Downloading reconstructed.npy for study {study_id} from MinIO...")
+                minio_client.fget_object(
+                    bucket_name="reconstructed",
+                    object_name=f"{study_id}/reconstructed.npy",
+                    file_path=tmp_npy_path
+                )
+                
+                data = np.load(tmp_npy_path)
+                if data.ndim >= 3:
+                    slice_data = data[data.shape[0] // 2]
+                else:
+                    slice_data = data
+                
+                s_min, s_max = slice_data.min(), slice_data.max()
+                denom = s_max - s_min
+                normalized = (slice_data - s_min) / denom * 255.0 if denom > 1e-8 else np.zeros_like(slice_data)
+                img = PILImage.fromarray(normalized.astype(np.uint8))
+                
+                with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_png:
+                    mri_png_path = tmp_png.name
+                img.save(mri_png_path, "PNG")
+                cmd.extend(["--mri", mri_png_path])
+                logger.info(f"Successfully generated temporary MRI PNG: {mri_png_path}")
+                
+                os.remove(tmp_npy_path)
+            except Exception as mri_err:
+                logger.error(f"Failed to fetch/convert MRI image for PDF: {mri_err}")
+
+            # 2. K-Space log-magnitude image
+            kspace_data = None
+            try:
+                with tempfile.NamedTemporaryFile(suffix='.npy', delete=False) as tmp_npy:
+                    tmp_npy_path = tmp_npy.name
+                
+                logger.info(f"Downloading kspace_log_mag.npy for study {study_id} from MinIO...")
+                minio_client.fget_object(
+                    bucket_name="reconstructed",
+                    object_name=f"{study_id}/kspace_log_mag.npy",
+                    file_path=tmp_npy_path
+                )
+                
+                kspace_data = np.load(tmp_npy_path)
+                os.remove(tmp_npy_path)
+            except Exception as ksp_err:
+                logger.warning(f"kspace_log_mag.npy not found for study {study_id}, trying dynamic generation...")
+                kspace_data = generate_kspace_log_mag_npy(study_id)
+                if kspace_data is None:
+                    logger.error(f"Failed to fetch/convert K-space image for PDF: {ksp_err}")
+
+            if kspace_data is not None:
+                try:
+                    if kspace_data.ndim >= 3:
+                        slice_data = kspace_data[kspace_data.shape[0] // 2]
+                    else:
+                        slice_data = kspace_data
+                    
+                    s_min, s_max = slice_data.min(), slice_data.max()
+                    denom = s_max - s_min
+                    normalized = (slice_data - s_min) / denom * 255.0 if denom > 1e-8 else np.zeros_like(slice_data)
+                    img = PILImage.fromarray(normalized.astype(np.uint8))
+                    
+                    with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_png:
+                        kspace_png_path = tmp_png.name
+                    img.save(kspace_png_path, "PNG")
+                    cmd.extend(["--kspace", kspace_png_path])
+                    logger.info(f"Successfully generated temporary K-Space PNG: {kspace_png_path}")
+                except Exception as img_err:
+                    logger.error(f"Failed to convert K-space numpy to PNG: {img_err}")
 
         logger.info(f"Invoking Rust PDF generator: {' '.join(cmd)}")
         res = subprocess.run(cmd, capture_output=True, text=True, check=True)
@@ -826,11 +971,12 @@ def compile_pdf_with_rust(report_text: str, patient_metadata: dict) -> bytes:
             
         return pdf_bytes
     finally:
-        try:
-            os.remove(f_in_name)
-            os.remove(f_out_name)
-        except Exception:
-            pass
+        for path in [f_in_name, f_out_name, mri_png_path, kspace_png_path]:
+            if path and os.path.exists(path):
+                try:
+                    os.remove(path)
+                except Exception:
+                    pass
 
 @app.post("/rag/ingest")
 def rag_ingest(data_dir: str = "/app/data"):
@@ -875,7 +1021,11 @@ def rag_generate_pdf(request: GeneratePdfRequest):
     from fastapi.responses import Response
     import io
     try:
-        pdf_bytes = compile_pdf_with_rust(request.report_text, request.patient_metadata)
+        pdf_bytes = compile_pdf_with_rust(
+            request.report_text,
+            request.patient_metadata,
+            study_id=request.study_id
+        )
         
         if request.study_id and minio_client:
             try:

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -874,6 +874,156 @@ function ArtifactRadarChart({ ghosting, wrapAround, zipperNoise }: { ghosting: n
   )
 }
 
+const renderFormattedReportText = (text: string | null) => {
+  if (!text) return null;
+  const lines = text.split(/\r?\n/);
+  const elements: React.ReactNode[] = [];
+  let inSkippingHeader = true;
+
+  const renderLineWithFormatting = (str: string) => {
+    // 1. Split by double asterisks for bold
+    const boldParts = str.split('**');
+    return boldParts.map((boldPart, bIdx) => {
+      const isBold = bIdx % 2 === 1;
+      
+      // 2. For each part, split by single asterisk for italic/highlight
+      const italicParts = boldPart.split('*');
+      const formattedItalic = italicParts.map((italicPart, iIdx) => {
+        const isItalic = iIdx % 2 === 1;
+        if (isItalic) {
+          return (
+            <span key={`i-${iIdx}`} style={{ fontStyle: 'italic', fontWeight: '600', color: '#1a365d' }}>
+              {italicPart}
+            </span>
+          );
+        }
+        return italicPart;
+      });
+
+      if (isBold) {
+        return (
+          <strong key={`b-${bIdx}`} style={{ color: '#1a365d', fontWeight: '700' }}>
+            {formattedItalic}
+          </strong>
+        );
+      }
+      return <React.Fragment key={`b-${bIdx}`}>{formattedItalic}</React.Fragment>;
+    });
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (inSkippingHeader) {
+      if (line === '---' || line === 'RADIOLOGY REPORT' || line === '') {
+        continue;
+      }
+      if (line.toLowerCase().startsWith('patient:') || line.toLowerCase().startsWith('date:')) {
+        continue;
+      }
+      inSkippingHeader = false;
+    }
+    if (line === '---' && i >= lines.length - 2) {
+      continue;
+    }
+    if (line === '') {
+      elements.push(<div key={`space-${i}`} style={{ height: '8px' }} />);
+      continue;
+    }
+    const isSectionHeader = [
+      'CLINICAL INDICATION',
+      'TECHNIQUE',
+      'FINDINGS',
+      'IMPRESSION',
+      'RECOMMENDATION'
+    ].some(h => line.toUpperCase().startsWith(h));
+
+    if (isSectionHeader) {
+      elements.push(
+        <div
+          key={`header-${i}`}
+          style={{
+            fontSize: '13px',
+            fontWeight: '700',
+            color: 'var(--color-accent-blue)',
+            textTransform: 'uppercase',
+            letterSpacing: '0.5px',
+            marginTop: '14px',
+            marginBottom: '6px',
+            borderBottom: '1px solid #edf2f7',
+            paddingBottom: '2px',
+          }}
+        >
+          {line}
+        </div>
+      );
+      continue;
+    }
+
+    const numberedMatch = line.match(/^(\d+)\.\s+(.*)/);
+    const bulletMatch = line.match(/^([-\*•])\s+(.*)/);
+
+    if (numberedMatch) {
+      const num = numberedMatch[1];
+      const content = numberedMatch[2];
+      elements.push(
+        <div
+          key={`num-item-${i}`}
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            marginLeft: '12px',
+            marginBottom: '3px',
+            fontSize: '13px',
+            lineHeight: '1.5',
+            color: '#2d3748',
+          }}
+        >
+          <span style={{ fontWeight: '600', color: 'var(--color-accent-blue)', marginRight: '6px', minWidth: '14px' }}>
+            {num}.
+          </span>
+          <span style={{ flex: 1 }}>{renderLineWithFormatting(content)}</span>
+        </div>
+      );
+    } else if (bulletMatch) {
+      const content = bulletMatch[2];
+      elements.push(
+        <div
+          key={`bullet-item-${i}`}
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            marginLeft: '12px',
+            marginBottom: '3px',
+            fontSize: '13px',
+            lineHeight: '1.5',
+            color: '#2d3748',
+          }}
+        >
+          <span style={{ fontWeight: '600', color: 'var(--color-accent-blue)', marginRight: '6px' }}>
+            •
+          </span>
+          <span style={{ flex: 1 }}>{renderLineWithFormatting(content)}</span>
+        </div>
+      );
+    } else {
+      elements.push(
+        <p
+          key={`para-${i}`}
+          style={{
+            margin: '0 0 5px 0',
+            fontSize: '13px',
+            lineHeight: '1.6',
+            color: '#2d3748',
+          }}
+        >
+          {renderLineWithFormatting(line)}
+        </p>
+      );
+    }
+  }
+  return <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>{elements}</div>;
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 export default function App() {
   // navigation
@@ -1115,6 +1265,62 @@ export default function App() {
   // archive / reports selection
   const [selectedStudy, setSelectedStudy] = useState<Study | null>(null)
   const [selectedReport, setSelectedReport] = useState<Report | null>(null)
+  const [isEditing, setIsEditing] = useState(false)
+  const [editImpression, setEditImpression] = useState('')
+
+  useEffect(() => {
+    if (selectedReport) {
+      setEditImpression(selectedReport.impression || '')
+      setIsEditing(false)
+    }
+  }, [selectedReport])
+
+  const getPatientAge = (dateOfBirthStr: string) => {
+    const dob = new Date(dateOfBirthStr)
+    const today = new Date()
+    let age = today.getFullYear() - dob.getFullYear()
+    const m = today.getMonth() - dob.getMonth()
+    if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) {
+      age--
+    }
+    return age
+  }
+
+  const handleSaveReport = async () => {
+    if (!selectedReport) return
+    try {
+      const response = await fetch(`${API}/reports/${selectedReport.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          impression: editImpression,
+          status: 'final'
+        })
+      })
+      const updated = await response.json()
+      if (response.ok) {
+        addLog(`Report ${selectedReport.id.substring(0, 8)}... updated successfully.`)
+        setSelectedReport(updated)
+        setReports(prev => prev.map(r => r.id === updated.id ? updated : r))
+        setIsEditing(false)
+      } else {
+        addLog(`Failed to save report: ${updated.error}`)
+      }
+    } catch (err: any) {
+      addLog(`Failed to save report: ${err.message}`)
+    }
+  }
+
+  const handleDownloadPdf = () => {
+    if (!selectedReport) return
+    const patientName = selectedReport.study?.patient?.name.replace(/\s+/g, '_') || 'patient'
+    const link = document.createElement('a')
+    link.href = `${API}/reports/${selectedReport.id}/pdf`
+    link.setAttribute('download', `radiology_report_${patientName}_${selectedReport.id.substring(0, 8)}.pdf`)
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }
 
   // IPC / browser detection
   const [ipcStatus, setIpcStatus] = useState('Checking IPC...')
@@ -1974,6 +2180,47 @@ export default function App() {
                   const f = parseFindings(selectedReport.findings)
                   return (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                      {/* Controls Bar */}
+                      <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', borderBottom: '1px solid var(--color-panel-border)', paddingBottom: '10px' }}>
+                        {isEditing ? (
+                          <>
+                            <button
+                              onClick={handleSaveReport}
+                              className="clinical-btn clinical-btn-primary"
+                              style={{ padding: '4px 12px', fontSize: '11px' }}
+                            >
+                              💾 Save Report
+                            </button>
+                            <button
+                              onClick={() => {
+                                setEditImpression(selectedReport.impression || '')
+                                setIsEditing(false)
+                              }}
+                              className="clinical-btn"
+                              style={{ padding: '4px 12px', fontSize: '11px' }}
+                            >
+                              ✕ Cancel
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => setIsEditing(true)}
+                              className="clinical-btn"
+                              style={{ padding: '4px 12px', fontSize: '11px' }}
+                            >
+                              ✏️ Edit Report
+                            </button>
+                            <button
+                              onClick={handleDownloadPdf}
+                              className="clinical-btn"
+                              style={{ padding: '4px 12px', fontSize: '11px' }}
+                            >
+                              📥 Download PDF
+                            </button>
+                          </>
+                        )}
+                      </div>
                       {/* Header */}
                       <div style={{ background: '#d1dadf', border: '1px solid var(--color-panel-border)', padding: '10px 12px' }}>
                         <div style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--color-accent-blue)', marginBottom: '6px' }}>
@@ -2025,6 +2272,141 @@ export default function App() {
                               </div>
                             )}
                           </div>
+
+                          {/* Standardized Radiology Report Sheet (Diagnostic layout) */}
+                          {(selectedReport.impression !== null || isEditing) && (
+                            <div style={{
+                              background: '#ffffff',
+                              color: '#2d3748',
+                              fontFamily: 'var(--font-sans)',
+                              fontSize: '14px',
+                              lineHeight: '1.6',
+                              padding: '24px',
+                              border: '1px solid #cbd5e0',
+                              borderRadius: '4px',
+                              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)',
+                            }}>
+                              {/* Clinic Letterhead */}
+                              <div style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                borderBottom: '2px solid var(--color-accent-blue)',
+                                paddingBottom: '12px',
+                                marginBottom: '16px',
+                              }}>
+                                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                  <span style={{ fontSize: '16px', fontWeight: 'bold', color: 'var(--color-accent-blue)', letterSpacing: '0.5px' }}>
+                                    KVISION // CLINICAL IMAGING CENTER
+                                  </span>
+                                  <span style={{ fontSize: '10px', color: 'var(--color-text-dim)', textTransform: 'uppercase', marginTop: '2px' }}>
+                                    Magnetom Trio 3T MRI Workstation
+                                  </span>
+                                </div>
+                                <div style={{ textAlign: 'right', fontSize: '10px', color: 'var(--color-text-dim)', lineHeight: '1.4' }}>
+                                  123 Health Ave, Suite 400<br />
+                                  Phone: (555) 019-2834<br />
+                                  reports@kvision.ai
+                                </div>
+                              </div>
+
+                              {/* Patient Info Table */}
+                              <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '20px', fontSize: '12px', border: '1px solid #e2e8f0' }}>
+                                <tbody>
+                                  <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
+                                    <td style={{ padding: '6px 10px', fontWeight: 'bold', color: '#4a5568', background: '#f7fafc', width: '20%', borderRight: '1px solid #e2e8f0' }}>Patient Name:</td>
+                                    <td style={{ padding: '6px 10px', color: '#2d3748', width: '30%', borderRight: '1px solid #e2e8f0' }}>{selectedReport.study?.patient?.name ?? '—'}</td>
+                                    <td style={{ padding: '6px 10px', fontWeight: 'bold', color: '#4a5568', background: '#f7fafc', width: '20%', borderRight: '1px solid #e2e8f0' }}>Referring Physician:</td>
+                                    <td style={{ padding: '6px 10px', color: '#2d3748', width: '30%' }}>Dr. Tarun Ahuja, MD</td>
+                                  </tr>
+                                  <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
+                                    <td style={{ padding: '6px 10px', fontWeight: 'bold', color: '#4a5568', background: '#f7fafc', borderRight: '1px solid #e2e8f0' }}>Patient ID:</td>
+                                    <td style={{ padding: '6px 10px', color: '#2d3748', fontFamily: 'var(--font-mono)', fontSize: '11px', borderRight: '1px solid #e2e8f0' }}>{selectedReport.study?.patient?.id.substring(0, 8) ?? '—'}</td>
+                                    <td style={{ padding: '6px 10px', fontWeight: 'bold', color: '#4a5568', background: '#f7fafc', borderRight: '1px solid #e2e8f0' }}>Modality:</td>
+                                    <td style={{ padding: '6px 10px', color: '#2d3748' }}>{selectedReport.study?.modality ?? 'MRI'} (3T)</td>
+                                  </tr>
+                                  <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
+                                    <td style={{ padding: '6px 10px', fontWeight: 'bold', color: '#4a5568', background: '#f7fafc', borderRight: '1px solid #e2e8f0' }}>Age / Gender:</td>
+                                    <td style={{ padding: '6px 10px', color: '#2d3748', borderRight: '1px solid #e2e8f0' }}>
+                                      {selectedReport.study?.patient?.dateOfBirth ? getPatientAge(selectedReport.study.patient.dateOfBirth) : '—'} / {selectedReport.study?.patient?.gender ?? '—'}
+                                    </td>
+                                    <td style={{ padding: '6px 10px', fontWeight: 'bold', color: '#4a5568', background: '#f7fafc', borderRight: '1px solid #e2e8f0' }}>Date of Study:</td>
+                                    <td style={{ padding: '6px 10px', color: '#2d3748' }}>
+                                      {selectedReport.study?.studyDate ? new Date(selectedReport.study.studyDate).toLocaleDateString() : '—'}
+                                    </td>
+                                  </tr>
+                                  <tr>
+                                    <td style={{ padding: '6px 10px', fontWeight: 'bold', color: '#4a5568', background: '#f7fafc', borderRight: '1px solid #e2e8f0' }}>Report ID:</td>
+                                    <td style={{ padding: '6px 10px', color: '#2d3748', fontFamily: 'var(--font-mono)', fontSize: '11px', borderRight: '1px solid #e2e8f0' }}>{selectedReport.id.substring(0, 8)}</td>
+                                    <td style={{ padding: '6px 10px', fontWeight: 'bold', color: '#4a5568', background: '#f7fafc', borderRight: '1px solid #e2e8f0' }}>Date of Report:</td>
+                                    <td style={{ padding: '6px 10px', color: '#2d3748' }}>{new Date(selectedReport.createdAt).toLocaleDateString()}</td>
+                                  </tr>
+                                </tbody>
+                              </table>
+
+                              <div style={{
+                                textAlign: 'center',
+                                fontSize: '14px',
+                                fontWeight: 'bold',
+                                textTransform: 'uppercase',
+                                color: '#1a365d',
+                                letterSpacing: '1px',
+                                marginBottom: '20px',
+                                borderBottom: '1px solid #cbd5e0',
+                                paddingBottom: '8px',
+                              }}>
+                                MAGNETIC RESONANCE IMAGING (MRI) BRAIN REPORT
+                              </div>
+
+                              {/* Report Text Content / Editor */}
+                              <div style={{ marginBottom: '30px' }}>
+                                {isEditing ? (
+                                  <textarea
+                                    value={editImpression}
+                                    onChange={(e) => setEditImpression(e.target.value)}
+                                    style={{
+                                      width: '100%',
+                                      height: '400px',
+                                      padding: '12px',
+                                      fontFamily: 'var(--font-mono)',
+                                      fontSize: '12px',
+                                      lineHeight: '1.5',
+                                      border: '1px solid #cbd5e0',
+                                      borderRadius: '4px',
+                                      outline: 'none',
+                                      resize: 'vertical',
+                                      color: '#2d3748',
+                                      background: '#fafafa',
+                                    }}
+                                  />
+                                ) : (
+                                  <div style={{ color: '#2d3748', fontSize: '13px', fontFamily: 'var(--font-sans)', lineHeight: '1.6' }}>
+                                    {renderFormattedReportText(selectedReport.impression)}
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Radiologist Signature */}
+                              <div style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'flex-end',
+                                borderTop: '1px solid #cbd5e0',
+                                paddingTop: '12px',
+                                marginTop: '30px',
+                                fontSize: '12px',
+                              }}>
+                                <div style={{ color: 'var(--color-text-dim)', fontStyle: 'italic', fontSize: '10px' }}>
+                                  * This report is interpreted electronically based on fused S4-CNN models and RAG-guided context.
+                                </div>
+                                <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                  <span style={{ fontWeight: 'bold', color: '#1a365d' }}>Dr. Tarun Ahuja, MD</span>
+                                  <span style={{ color: 'var(--color-text-dim)', fontSize: '11px' }}>Consultant Radiologist</span>
+                                  <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-dim)', fontSize: '10px' }}>Reg No: NS-2026-994</span>
+                                </div>
+                              </div>
+                            </div>
+                          )}
 
                           {f.reconstructedKey && (
                             <div style={{ border: '1px solid var(--color-panel-border)', padding: '12px', background: '#f5f7f8' }}>

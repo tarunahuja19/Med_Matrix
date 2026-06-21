@@ -72,10 +72,47 @@ async function processStudy(job: Job<StudyJobData>): Promise<void> {
       : 'K-Space anomaly score below threshold — image encoder not triggered.',
   })
 
+  // ── 80%: Query RAG Reporting Agent and Create draft report ────────────────
+  const study = await prisma.study.findUnique({
+    where: { id: studyId },
+    include: { patient: true },
+  })
+  const patient = study?.patient
+
+  let generatedReport: string | null = null
+  if (patient && inferenceResult.predictedPathology) {
+    try {
+      const dob = new Date(patient.dateOfBirth)
+      const today = new Date()
+      let age = today.getFullYear() - dob.getFullYear()
+      const m = today.getMonth() - dob.getMonth()
+      if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) {
+        age--
+      }
+
+      generatedReport = await aiClient.generateRagReport(
+        inferenceResult.predictedPathology,
+        {
+          name: patient.name,
+          age: age,
+          gender: patient.gender,
+          dateOfBirth: patient.dateOfBirth.toISOString(),
+          symptoms: inferenceResult.predictedPathology === 'Normal'
+            ? 'Routine check'
+            : `Suspected ${inferenceResult.predictedPathology.replace(/_/g, ' ')}`,
+          studyDate: study.studyDate.toISOString(),
+        }
+      )
+    } catch (err: any) {
+      console.error(`[worker] Failed to generate RAG report: ${err.message}`)
+    }
+  }
+
   await prisma.report.create({
     data: {
       studyId,
       findings: findingsSummary,
+      impression: generatedReport,
       status: 'draft',
     },
   })

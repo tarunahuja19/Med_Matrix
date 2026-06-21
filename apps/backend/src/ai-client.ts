@@ -200,6 +200,37 @@ export class AIServiceClient {
       reconstructedGradcamKey: reconstructed_gradcam_key ?? null,
     }
   }
+
+  /**
+   * Generates a radiology report from clinical indication, patient metadata,
+   * and scientific context via the FastAPI RAG agent query endpoint.
+   */
+  async generateRagReport(
+    diseaseName: string,
+    patientMetadata: {
+      name: string
+      age: number
+      gender: string
+      dateOfBirth: string
+      symptoms?: string
+      studyDate?: string
+    }
+  ): Promise<string | null> {
+    try {
+      const res = await this.http.post<{ status: string; report: string }>('/rag/query', {
+        disease_name: diseaseName,
+        patient_metadata: patientMetadata,
+        llm_model: 'gemini-3.5-flash',
+      })
+      if (res.data && res.data.status === 'success') {
+        return res.data.report
+      }
+      return null
+    } catch (err: any) {
+      console.error(`AI-service /rag/query failed: ${err.message}`)
+      return null
+    }
+  }
 }
 
 // Singleton export so worker and routes share one instance
