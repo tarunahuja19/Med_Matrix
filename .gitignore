@@ -53,3 +53,6 @@ ai-service/report_pdf
 # Debug / scratch files
 apps/backend/src/query_debug.ts
 radiology_report_template.html
+
+# Obsidian Developer Vault
+second-brain/
