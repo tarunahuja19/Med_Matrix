@@ -62,7 +62,11 @@ Provides a real-time, interactive 3D mesh rendering of patient brains, overlayin
 ### 2. 2D Clinical Slice Viewer
 A clinical-grade multi-planar slice viewer powered by Cornerstone3D, allowing radiologists to scroll through reconstructed axial, sagittal, and coronal slices, overlaying segmentation masks and AI-detected pathology logits.
 
+#### Spatial Domain (Reconstructed MRI Slice)
 ![2D Clinical Slice Viewer Interface](assets/2d_slice_viewer_showcase.png)
+
+#### Frequency Domain (Raw K-Space Acquisition)
+![K-Space Viewer Interface](assets/kspace_viewer_showcase.png)
 
 ---
 
