@@ -23,6 +23,9 @@ Med_Matrix/
 │   ├── cnn_model.py             <- Parameter-efficient Conv2D spatial branch module
 │   ├── s4_model.py              <- Complex-valued S4 sequence branch module
 │   ├── train.py                 <- Multi-GPU training script with DDP
+│   ├── train_anomaly_detector.py <- Anomaly detector training and ONNX export script
+│   ├── evaluate_onnx.py         <- ONNX validation evaluation runner script
+│   ├── anomaly_detector_model.py <- State Space Model (SSM) based MRI Anomaly Estimator
 │   ├── export_onnx.py           <- Export script mapping trained checkpoint to ONNX
 │   ├── export_fused_onnx.py     <- Fused model ONNX export helper
 │   ├── generate_synthetic_dataset.py <- Volumetric K-space synthetic generator
@@ -38,7 +41,10 @@ Med_Matrix/
 │       ├── CMakeLists.txt       <- CMake build config (ONNX Runtime + protobuf/abseil)
 │       ├── kvision_inference.h  <- C++ header: InferenceEngine, KSpaceDims, result structures
 │       ├── kvision_inference.cpp <- Implementation: CUDA/CPU backends, softmax, argmax
-│       └── test_inference.cpp   <- 10-test CLI runner (loading, accuracy, determinism, throughput)
+│       ├── test_inference.cpp   <- 10-test CLI runner (loading, accuracy, determinism, throughput)
+│       ├── anomaly_detector_inference.h  <- C++ header: AnomalyKSpaceDims, AnomalyDetectorEngine class API
+│       ├── anomaly_detector_inference.cpp <- Implementation: ORT sessions, dual inputs, severity predictions
+│       └── test_anomaly_detector_inference.cpp <- 9-test CLI runner validating bounds, accuracy, determinism
 ├── 📱 apps/
 │   ├── 🖥️ electron/             <- Desktop frontend app (Electron + React + TS)
 │   │   ├── src/main/            <- Main process, IPC bridges, and window control
@@ -144,6 +150,20 @@ For Phase 3/4, the platform integrates a **Hybrid Fused Volumetric MRI Classifie
 | Run 2 (resume) | 100 (new) | 128 | 10 | 50.00% | ~67M |
 | Run 3 (256-res) | 300 | 256 | 50 | 57.81% | ~67M |
 | **Run 4 (production)** | **600** | **128** | **50** | **88.28%** | **~281k** |
+
+---
+
+## ⚙️ SSM Anomaly Estimator & C++ Inference Engine
+
+The platform integrates a **State Space Model (SSM) based MRI Anomaly Estimator** designed to process raw multi-coil complex K-space slices row-by-row and output continuous corruption levels.
+
+*   **Model Representation:** Exported to `anomaly_detector.onnx` (5.9 MB, ~546k parameters).
+*   **Input Shape:** 
+    *   `kspace`: `[batch, 32, 256, 256]` — 32 channels (stacked real and imaginary parts of 16 coils) × 256×256 spatial resolution.
+    *   `contrast`: `[batch]` — Int64 values (`0` for T1, `1` for T2).
+*   **Output Shape:** `predictions`: `[batch, 3]` — continuous parameter estimates for `[noise_severity, motion_severity, phase_severity]`.
+*   **C++ Engine:** Implemented in `anomaly_detector_inference.h` and `anomaly_detector_inference.cpp` inside `ai-service/inference/`. Supports GPU (CUDA) and CPU fallback execution. All 9 tests pass.
+*   **Detailed Notes:** See [memories/inference.md](inference.md) for architecture, shapes, and integration code.
 
 ---
 

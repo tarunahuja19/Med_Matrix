@@ -42,6 +42,7 @@ endif()
 # ── Inference library ──
 add_library(kvision_infer STATIC
     kvision_inference.cpp
+    anomaly_detector_inference.cpp
 )
 target_include_directories(kvision_infer PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -56,6 +57,9 @@ target_link_libraries(kvision_infer PUBLIC
 add_executable(test_inference test_inference.cpp)
 target_link_libraries(test_inference PRIVATE kvision_infer)
 
+add_executable(test_anomaly_detector_inference test_anomaly_detector_inference.cpp)
+target_link_libraries(test_anomaly_detector_inference PRIVATE kvision_infer)
+
 # ── Install ──
 install(TARGETS kvision_infer ARCHIVE DESTINATION lib)
-install(FILES kvision_inference.h DESTINATION include)
+install(FILES kvision_inference.h anomaly_detector_inference.h DESTINATION include)

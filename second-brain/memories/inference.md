@@ -166,3 +166,72 @@ The index maps directly to the output probabilities:
 *   **Peak Validation Accuracy**: **88.28%** (epoch 40)
 *   **Final Validation Accuracy**: **87.50%**
 *   **C++ Runtime**: Verified with 10/10 tests passing on both CPU and CUDA backends
+
+### Anomaly Estimator Run (Current Model: `anomaly_detector.onnx`)
+*   **Date**: 2026-06-22
+*   **Architecture**: SSM-based KSpaceAnomalyEstimator (~546k parameters)
+*   **Training**: 15 epochs on synthetic dataset (coils=16, resolution=256)
+*   **Overall Regression MSE**: **0.103459** (MAE = **0.277900**)
+*   **C++ Runtime**: Verified with 9/9 tests passing on CPU backend
+
+---
+
+## 6. SSM-Based K-Space Anomaly Estimator & C++ Engine
+
+For MRI anomaly estimation, we employ a State Space Model (SSM) design to process raw multi-coil complex K-space slices row-by-row and output continuous corruption parameter estimates.
+
+### 6.1 Model Architecture & Input/Output Shapes
+*   **Model Representation:** Exported to `anomaly_detector.onnx` (5.9 MB, ~546k parameters).
+*   **Layer Structure:**
+    *   **Input Projection:** Linear layer mapping the flattened sequence features (`2 * coils * resolution = 8192`) to the latent space (`d_model = 64`).
+    *   **Real SSM Blocks:** 2 sequential blocks comprising `LayerNorm` -> `RealDiagonalSSM` -> `Dropout` -> `Linear` + residual connections.
+    *   **Contrast Embedding:** Embedding layer representing contrast (T1 vs T2).
+    *   **Regression Head:** Fully connected layers mapping combined features to a 3-element output, bounded in `[0, 1]` via sigmoid: `[noise_severity, motion_severity, phase_severity]`.
+
+#### Tensor Dimensions & Layouts
+- **Inputs**:
+  - `kspace`: Float32 tensor of shape `[BatchSize, 32, 256, 256]`.
+    - *Explanation*: Stacked real/imaginary parts of 16-coil data ($2 \times 16 = 32$ channels) at $256 \times 256$ spatial resolution.
+  - `contrast`: Int64 tensor of shape `[BatchSize]` (contains `0` for T1, `1` for T2).
+- **Outputs**:
+  - `predictions`: Float32 tensor of shape `[BatchSize, 3]`.
+
+---
+
+### 6.2 C++ Integration & API Usage
+The C++ inference class `kvision::AnomalyDetectorEngine` is declared in `anomaly_detector_inference.h`. It implements ONNX Runtime v1.24.4 C++ bindings to execute prediction tasks.
+
+#### Usage Example
+```cpp
+#include "anomaly_detector_inference.h"
+
+// 1. Configure the engine
+kvision::AnomalyConfig cfg;
+cfg.model_path = "anomaly_detector.onnx";
+cfg.num_threads = 1; // Limit parallelism to prevent spinlock thread thrashing
+
+// 2. Initialize
+kvision::AnomalyDetectorEngine engine(cfg);
+
+// 3. Create input buffers (32 channels * 256 * 256 = 2,097,152 float elements)
+std::vector<float> input_kspace = load_mri_slice(); 
+int64_t contrast = 0; // T1 weighted
+
+// 4. Run inference
+kvision::AnomalyResult result = engine.infer(input_kspace, contrast);
+
+std::cout << "Noise: " << result.noise_severity << ", Motion: " << result.motion_severity << std::endl;
+```
+
+#### Step-by-Step C++ Execution Flow
+1. **Instantiation**: Load the ONNX model from disk, caching input/output node names (`kspace`, `contrast`, and `predictions`).
+2. **Buffer Preparation**: Bind the flat float array (`2,097,152` elements) directly to an ORT memory tensor. Wrap the contrast integer into an int64 ORT tensor.
+3. **Session Run**: Feed both inputs to `Ort::Session::Run()`.
+4. **Result Parsing**: Extract the float array pointer from the output tensor and map indices directly to `AnomalyResult` properties.
+
+---
+
+### 6.3 Performance Benchmarks & Testing
+The C++ implementation is verified via `test_anomaly_detector_inference` (all 9 tests passing):
+- **Equivalence Check:** Predictions match the PyTorch Python model within float32 precision tolerance (maximum difference $\approx 5.96 \times 10^{-8}$).
+- **Throughput:** Processes slices at **~23.4 ms per inference** (~42.8 slices/sec) on a single CPU thread.

@@ -33,6 +33,8 @@ This directory links to key files in the MedMatrix workspace, sorted by monorepo
 ### 🧠 Trained Models & Training Artifacts
 *   [fused_model_128.onnx](file:///home/jemin/Projects/Med_Matrix/ai-service/fused_model_128.onnx) — Production ONNX model (128-res, 8 slices × 16 coils, ~281k params, 88.28% peak accuracy).
 *   [fused_model_128.pt](file:///home/jemin/Projects/Med_Matrix/ai-service/fused_model_128.pt) — PyTorch checkpoint for the production model.
+*   [anomaly_detector.onnx](file:///home/jemin/Projects/Med_Matrix/ai-service/anomaly_detector.onnx) — Production ONNX anomaly detector model (256-res, 32 channels, ~546k params).
+*   [anomaly_detector.pt](file:///home/jemin/Projects/Med_Matrix/ai-service/anomaly_detector.pt) — PyTorch checkpoint for the production anomaly detector model.
 *   [training_progress.log](file:///home/jemin/Projects/Med_Matrix/training_progress.log) — Live training log synced from Kaggle remote GPU server.
 *   [PhantomNet_multiclass600.ipynb](file:///home/jemin/Projects/Med_Matrix/PhantomNet_multiclass600.ipynb) — Kaggle notebook for remote GPU training (600 patients).
 
@@ -49,9 +51,12 @@ This directory links to key files in the MedMatrix workspace, sorted by monorepo
 *   [ai-service/fused_model_onnx.py](file:///home/jemin/Projects/Med_Matrix/ai-service/fused_model_onnx.py) — ONNX-compatible real-valued twin model module (for export).
 *   [ai-service/cnn_model.py](file:///home/jemin/Projects/Med_Matrix/ai-service/cnn_model.py) — Parameter-efficient Conv2D spatial branch module.
 *   [ai-service/s4_model.py](file:///home/jemin/Projects/Med_Matrix/ai-service/s4_model.py) — Complex-valued S4 sequence branch module.
+*   [ai-service/anomaly_detector_model.py](file:///home/jemin/Projects/Med_Matrix/ai-service/anomaly_detector_model.py) — State Space Model (SSM) based MRI Anomaly Estimator.
 
 #### Training & Export
 *   [ai-service/train.py](file:///home/jemin/Projects/Med_Matrix/ai-service/train.py) — Multi-GPU DDP training script.
+*   [ai-service/train_anomaly_detector.py](file:///home/jemin/Projects/Med_Matrix/ai-service/train_anomaly_detector.py) — Anomaly detector training and ONNX export script.
+*   [ai-service/evaluate_onnx.py](file:///home/jemin/Projects/Med_Matrix/ai-service/evaluate_onnx.py) — ONNX validation evaluation runner script.
 *   [ai-service/export_onnx.py](file:///home/jemin/Projects/Med_Matrix/ai-service/export_onnx.py) — Export script mapping trained checkpoint weights to the real-valued ONNX model.
 *   [ai-service/export_fused_onnx.py](file:///home/jemin/Projects/Med_Matrix/ai-service/export_fused_onnx.py) — Fused model ONNX export helper.
 *   [ai-service/generate_synthetic_dataset.py](file:///home/jemin/Projects/Med_Matrix/ai-service/generate_synthetic_dataset.py) — Volumetric K-space synthetic generator script.
@@ -80,6 +85,9 @@ This directory links to key files in the MedMatrix workspace, sorted by monorepo
 *   [ai-service/inference/kvision_inference.h](file:///home/jemin/Projects/Med_Matrix/ai-service/inference/kvision_inference.h) — C++ header: pathology enums, `KSpaceDims` (8×16×128×128×2), `InferenceEngine` class API.
 *   [ai-service/inference/kvision_inference.cpp](file:///home/jemin/Projects/Med_Matrix/ai-service/inference/kvision_inference.cpp) — Implementation: ONNX Runtime C++ API, CUDA/CPU backends, softmax, argmax.
 *   [ai-service/inference/test_inference.cpp](file:///home/jemin/Projects/Med_Matrix/ai-service/inference/test_inference.cpp) — 10-test CLI runner: loading, accuracy, determinism, sensitivity, error handling, throughput.
+*   [ai-service/inference/anomaly_detector_inference.h](file:///home/jemin/Projects/Med_Matrix/ai-service/inference/anomaly_detector_inference.h) — C++ header: `AnomalyKSpaceDims` (32×256×256), `AnomalyDetectorEngine` class API.
+*   [ai-service/inference/anomaly_detector_inference.cpp](file:///home/jemin/Projects/Med_Matrix/ai-service/inference/anomaly_detector_inference.cpp) — Implementation: ONNX Runtime C++ API, CUDA/CPU backends, dual inputs, severity predictions.
+*   [ai-service/inference/test_anomaly_detector_inference.cpp](file:///home/jemin/Projects/Med_Matrix/ai-service/inference/test_anomaly_detector_inference.cpp) — 9-test CLI runner validating bounds, accuracy, determinism, error handling, throughput.
 
 ### 🦀 Rust MRI Prototype (`rust-mri/`)
 *   [rust-mri/Cargo.toml](file:///home/jemin/Projects/Med_Matrix/rust-mri/Cargo.toml) — Rust project configuration.
