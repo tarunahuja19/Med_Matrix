@@ -54,6 +54,9 @@ interface AIFindings {
   pathologyProbabilities?: Record<string, number>
   kspaceGradcamKey?: string
   kspaceLogMagKey?: string
+  noiseSeverity?: number
+  motionSeverity?: number
+  phaseSeverity?: number
 }
 
 interface ProgressionPoint {
@@ -3051,6 +3054,134 @@ export default function App() {
                                 <span className="detail-val" style={{ fontFamily: 'var(--font-mono)' }}>{(v as number).toFixed(3)}</span>
                               </div>
                             ))}
+                            {(f.noiseSeverity !== undefined || f.motionSeverity !== undefined || f.phaseSeverity !== undefined) && (
+                              <div style={{ display: 'contents' }}>
+                                <div style={{ gridColumn: 'span 2', height: '1px', background: 'var(--color-panel-border)', margin: '8px 0' }} />
+                                <div style={{ gridColumn: 'span 2', fontWeight: 600, color: 'var(--color-text-dim)', fontSize: '10px', textTransform: 'uppercase', marginBottom: '4px' }}>SSM Severity Metrics</div>
+                                
+                                <span className="detail-label">Noise Severity:</span>
+                                <span className="detail-val">
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <div style={{ flex: 1, height: '6px', background: 'var(--color-panel-border)', borderRadius: '3px', overflow: 'hidden', position: 'relative', width: '80px' }}>
+                                      <div style={{
+                                        position: 'absolute',
+                                        left: 0,
+                                        top: 0,
+                                        height: '100%',
+                                        width: `${((f.noiseSeverity ?? 0) * 100).toFixed(0)}%`,
+                                        background: (f.noiseSeverity ?? 0) > 0.5 ? 'var(--color-accent-red)' : (f.noiseSeverity ?? 0) > 0.15 ? 'var(--color-accent-amber)' : 'var(--color-accent-green)'
+                                      }} />
+                                    </div>
+                                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', minWidth: '35px', textAlign: 'right' }}>
+                                      {((f.noiseSeverity ?? 0) * 100).toFixed(1)}%
+                                    </span>
+                                  </div>
+                                </span>
+
+                                <span className="detail-label">Motion Severity:</span>
+                                <span className="detail-val">
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <div style={{ flex: 1, height: '6px', background: 'var(--color-panel-border)', borderRadius: '3px', overflow: 'hidden', position: 'relative', width: '80px' }}>
+                                      <div style={{
+                                        position: 'absolute',
+                                        left: 0,
+                                        top: 0,
+                                        height: '100%',
+                                        width: `${((f.motionSeverity ?? 0) * 100).toFixed(0)}%`,
+                                        background: (f.motionSeverity ?? 0) > 0.5 ? 'var(--color-accent-red)' : (f.motionSeverity ?? 0) > 0.15 ? 'var(--color-accent-amber)' : 'var(--color-accent-green)'
+                                      }} />
+                                    </div>
+                                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', minWidth: '35px', textAlign: 'right' }}>
+                                      {((f.motionSeverity ?? 0) * 100).toFixed(1)}%
+                                    </span>
+                                  </div>
+                                </span>
+
+                                <span className="detail-label">Phase Severity:</span>
+                                <span className="detail-val">
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <div style={{ flex: 1, height: '6px', background: 'var(--color-panel-border)', borderRadius: '3px', overflow: 'hidden', position: 'relative', width: '80px' }}>
+                                      <div style={{
+                                        position: 'absolute',
+                                        left: 0,
+                                        top: 0,
+                                        height: '100%',
+                                        width: `${((f.phaseSeverity ?? 0) * 100).toFixed(0)}%`,
+                                        background: (f.phaseSeverity ?? 0) > 0.5 ? 'var(--color-accent-red)' : (f.phaseSeverity ?? 0) > 0.15 ? 'var(--color-accent-amber)' : 'var(--color-accent-green)'
+                                      }} />
+                                    </div>
+                                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', minWidth: '35px', textAlign: 'right' }}>
+                                      {((f.phaseSeverity ?? 0) * 100).toFixed(1)}%
+                                    </span>
+                                  </div>
+                                </span>
+                              </div>
+                            )}
+                            {(f.noiseSeverity !== undefined || f.motionSeverity !== undefined || f.phaseSeverity !== undefined) && (() => {
+                              const hasSevereIssue = (f.noiseSeverity ?? 0) > 0.5 || (f.motionSeverity ?? 0) > 0.5 || (f.phaseSeverity ?? 0) > 0.5;
+                              const hasMildIssue = (f.noiseSeverity ?? 0) > 0.15 || (f.motionSeverity ?? 0) > 0.15 || (f.phaseSeverity ?? 0) > 0.15;
+                              
+                              if (!hasMildIssue && !hasSevereIssue) return null;
+                              
+                              const recommendations: { title: string; cause: string; tip: string }[] = [];
+                              
+                              if ((f.noiseSeverity ?? 0) > 0.15) {
+                                recommendations.push({
+                                  title: "Low Signal-to-Noise Ratio (SNR)",
+                                  cause: "High thermal/channel noise or low signal amplitude.",
+                                  tip: "Increase averages (NEX/NSA), use dedicated multi-channel receive coil, or increase slice thickness."
+                                });
+                              }
+                              if ((f.motionSeverity ?? 0) > 0.15) {
+                                recommendations.push({
+                                  title: "Patient Motion Artifacts",
+                                  cause: "Swallowing, breathing, or voluntary physical movement.",
+                                  tip: "Secure patient positioning (padding), instruct patient to remain still, or enable gating/PROPELLER/BLADE."
+                                });
+                              }
+                              if ((f.phaseSeverity ?? 0) > 0.15) {
+                                recommendations.push({
+                                  title: "Phase/Off-Resonance Dispersion",
+                                  cause: "Field inhomogeneities, magnetic susceptibility, or eddy currents.",
+                                  tip: "Run high-order shimming before the scan, increase receiver bandwidth, or run phase correction reference scans."
+                                });
+                              }
+                              
+                              return (
+                                <div style={{
+                                  gridColumn: 'span 2',
+                                  marginTop: '12px',
+                                  padding: '10px',
+                                  background: hasSevereIssue ? 'rgba(231,76,60,0.08)' : 'rgba(224,184,122,0.08)',
+                                  border: '1px solid',
+                                  borderColor: hasSevereIssue ? 'var(--color-accent-red)' : 'var(--color-accent-amber)',
+                                  borderRadius: '4px'
+                                }}>
+                                  <div style={{
+                                    fontWeight: 'bold',
+                                    fontSize: '11px',
+                                    color: hasSevereIssue ? 'var(--color-accent-red)' : 'var(--color-accent-amber)',
+                                    textTransform: 'uppercase',
+                                    marginBottom: '8px'
+                                  }}>
+                                    ⚠ Clinical Scanning Advisor
+                                  </div>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                    {recommendations.map((rec, idx) => (
+                                      <div key={idx} style={{ fontSize: '11px', lineHeight: '1.4' }}>
+                                        <div style={{ fontWeight: 600, color: 'var(--color-text-main)' }}>{rec.title}</div>
+                                        <div style={{ color: 'var(--color-text-dim)', fontSize: '10px', marginBottom: '2px' }}>
+                                          <span style={{ fontWeight: 500 }}>Root Cause:</span> {rec.cause}
+                                        </div>
+                                        <div style={{ color: 'var(--color-accent-blue)', fontSize: '10px' }}>
+                                          <span style={{ fontWeight: 500 }}>Mitigation:</span> {rec.tip}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              );
+                            })()}
                           </div>
                         </div>
                       )

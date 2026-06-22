@@ -97,6 +97,11 @@ model AnomalyDetection {
   wrapAroundScore Float
   zipperScore     Float
 
+  /// SSM regression severity scores [0, 1]
+  noiseSeverity   Float?
+  motionSeverity  Float?
+  phaseSeverity   Float?
+
   /// Max of the three individual scores (used for gating)
   compositeScore  Float
 

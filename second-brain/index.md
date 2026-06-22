@@ -17,6 +17,7 @@ Use these links to navigate through the persistent memories and attempt logs:
 *   [attempts/phase_1_jemin.md](attempts/phase_1_jemin.md) — Phase 1: K-Space loader, reconstructions, motion correction, denoiser, and automated testing.
 *   [attempts/phase_2_gating_logic.md](attempts/phase_2_gating_logic.md) — Phase 2: FastAPI `/predict` endpoint, Prisma schemas, Axios Node.js AI client, and BullMQ background worker.
 *   [attempts/phase_3_training_and_cpp.md](attempts/phase_3_training_and_cpp.md) — Phase 3: Multi-GPU model training (4 iterations → 88.28% accuracy), ONNX export, and C++ runtime integration.
+*   [attempts/phase_4_ssm_anomaly_integration.md](attempts/phase_4_ssm_anomaly_integration.md) — Phase 4: Integration of the SSM-based K-Space Anomaly Estimator.
 
 ---
 

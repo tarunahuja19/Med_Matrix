@@ -88,6 +88,9 @@ class PredictResponse(BaseModel):
     kspace_gradcam_key: Optional[str] = Field(default=None, description="MinIO key where the K-space Grad-CAM overlay is stored")
     kspace_log_mag_key: Optional[str] = Field(default=None, description="MinIO key where the K-space log-magnitude is stored")
     reconstructed_gradcam_key: Optional[str] = Field(default=None, description="MinIO key where the reconstructed image Grad-CAM overlay is stored")
+    noise_severity: Optional[float] = Field(default=None, description="Estimated noise severity")
+    motion_severity: Optional[float] = Field(default=None, description="Estimated motion severity")
+    phase_severity: Optional[float] = Field(default=None, description="Estimated phase severity")
     message: Optional[str] = None
 
 

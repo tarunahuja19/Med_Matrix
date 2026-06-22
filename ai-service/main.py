@@ -462,6 +462,43 @@ def get_pathology_model():
     return _PATHOLOGY_MODEL
 
 
+_ANOMALY_ESTIMATOR_MODEL = None
+
+def get_anomaly_estimator_model():
+    global _ANOMALY_ESTIMATOR_MODEL
+    if _ANOMALY_ESTIMATOR_MODEL is not None:
+        return _ANOMALY_ESTIMATOR_MODEL
+        
+    from anomaly_detector_model import KSpaceAnomalyEstimator
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    weights_path = os.path.join(os.path.dirname(__file__), 'anomaly_detector.pt')
+    
+    model = KSpaceAnomalyEstimator(
+        coils=16,
+        resolution=256,
+        d_model=64
+    )
+    
+    if os.path.exists(weights_path):
+        try:
+            state_dict = torch.load(weights_path, map_location=device)
+            new_state_dict = {}
+            for k, v in state_dict.items():
+                name = k[7:] if k.startswith('module.') else k
+                new_state_dict[name] = v
+            model.load_state_dict(new_state_dict, strict=False)
+            logger.info(f"Successfully loaded KSpace Anomaly Estimator model from {weights_path}")
+        except Exception as e:
+            logger.error(f"Error loading KSpace Anomaly Estimator model weights: {e}")
+    else:
+        logger.warning(f"KSpace Anomaly Estimator model weights not found at {weights_path}")
+        
+    model = model.to(device)
+    model.eval()
+    _ANOMALY_ESTIMATOR_MODEL = model
+    return _ANOMALY_ESTIMATOR_MODEL
+
+
 # ---------------------------------------------------------------------------
 # Phase 2 — /predict
 # K-Space anomaly detection + gating logic
@@ -789,6 +826,85 @@ def predict(request: PredictRequest):
         except Exception as e:
             logger.error(f"[predict] Pathology classification failed: {e}")
 
+        # ── Step 6c: K-Space Anomaly Estimator (SSM) ───────────────────────
+        noise_severity = None
+        motion_severity = None
+        phase_severity = None
+
+        try:
+            logger.info("[predict] Running K-Space Anomaly Estimator (SSM) model...")
+            anomaly_model = get_anomaly_estimator_model()
+            
+            # Preprocess K-space: raw shape is [slices, coils, height, width]
+            slices_in, coils_in, h_in, w_in = kspace.shape
+            x_complex = kspace.astype(np.complex64)
+            x_tensor = torch.from_numpy(x_complex) # [slices, coils, H, W]
+
+            # Resample spatial dimensions: Crop or Pad K-Space to 256x256
+            target_res = 256
+            if h_in > target_res:
+                sh = (h_in - target_res) // 2
+                x_tensor = x_tensor[:, :, sh:sh+target_res, :]
+            elif h_in < target_res:
+                pad_h = (target_res - h_in) // 2
+                pad_tensor = torch.zeros((slices_in, coils_in, target_res, w_in), dtype=x_tensor.dtype, device=x_tensor.device)
+                pad_tensor[:, :, pad_h:pad_h+h_in, :] = x_tensor
+                x_tensor = pad_tensor
+
+            slices_in, coils_in, h_in, w_in = x_tensor.shape
+            if w_in > target_res:
+                sw = (w_in - target_res) // 2
+                x_tensor = x_tensor[:, :, :, sw:sw+target_res]
+            elif w_in < target_res:
+                pad_w = (target_res - w_in) // 2
+                pad_tensor = torch.zeros((slices_in, coils_in, target_res, target_res), dtype=x_tensor.dtype, device=x_tensor.device)
+                pad_tensor[:, :, :, pad_w:pad_w+w_in] = x_tensor
+                x_tensor = pad_tensor
+
+            # Now x_tensor shape is [slices_in, coils_in, 256, 256]
+            # Adjust coils to exactly 16
+            if coils_in <= 16:
+                final_complex = torch.zeros(slices_in, 16, 256, 256, dtype=x_tensor.dtype, device=x_tensor.device)
+                final_complex[:, :coils_in] = x_tensor
+            else:
+                final_complex = x_tensor[:, :16]
+
+            # Standard deviation normalization based on magnitude slice-by-slice
+            normalized_complex = torch.zeros_like(final_complex)
+            for s in range(slices_in):
+                slice_abs = torch.abs(final_complex[s])
+                norm_factor = torch.std(slice_abs)
+                if norm_factor > 0:
+                    normalized_complex[s] = final_complex[s] / norm_factor
+                else:
+                    normalized_complex[s] = final_complex[s]
+
+            # Stack real and imaginary parts: shape [slices, 32, 256, 256]
+            x_real = torch.real(normalized_complex)
+            x_imag = torch.imag(normalized_complex)
+            x_anomaly_input = torch.cat([x_real, x_imag], dim=1) # [slices, 32, 256, 256]
+
+            # Generate contrast tensor: 0 for T1 (slice 0), 1 for T2 (slices 1 to end)
+            contrast_list = [0 if s == 0 else 1 for s in range(slices_in)]
+            contrast_tensor = torch.tensor(contrast_list, dtype=torch.long, device=x_anomaly_input.device)
+
+            device = next(anomaly_model.parameters()).device
+            x_anomaly_input = x_anomaly_input.to(device)
+            contrast_tensor = contrast_tensor.to(device)
+
+            with torch.no_grad():
+                preds = anomaly_model(x_anomaly_input, contrast_tensor) # [slices, 3]
+                preds_np = preds.cpu().numpy()
+                
+            # Aggregate severities across slices using max-severity aggregation
+            noise_severity = float(np.max(preds_np[:, 0]))
+            motion_severity = float(np.max(preds_np[:, 1]))
+            phase_severity = float(np.max(preds_np[:, 2]))
+            
+            logger.info(f"[predict] K-Space Anomaly Estimator complete: noise={noise_severity:.4f}, motion={motion_severity:.4f}, phase={phase_severity:.4f}")
+        except Exception as e:
+            logger.error(f"[predict] K-Space Anomaly Estimator failed: {e}")
+
         # ── Step 7: Return response ────────────────────────────────────────
         return PredictResponse(
             status="success",
@@ -803,6 +919,9 @@ def predict(request: PredictRequest):
             kspace_gradcam_key=kspace_gradcam_key,
             kspace_log_mag_key=kspace_log_mag_key,
             reconstructed_gradcam_key=reconstructed_gradcam_key,
+            noise_severity=noise_severity,
+            motion_severity=motion_severity,
+            phase_severity=phase_severity,
             message=reason,
         )
 

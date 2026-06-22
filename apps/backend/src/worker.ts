@@ -67,6 +67,9 @@ async function processStudy(job: Job<StudyJobData>): Promise<void> {
     kspaceGradcamKey: inferenceResult.kspaceGradcamKey,
     kspaceLogMagKey: inferenceResult.kspaceLogMagKey,
     reconstructedGradcamKey: inferenceResult.reconstructedGradcamKey,
+    noiseSeverity: inferenceResult.noiseSeverity,
+    motionSeverity: inferenceResult.motionSeverity,
+    phaseSeverity: inferenceResult.phaseSeverity,
     note: inferenceResult.anomalyDetected
       ? undefined
       : 'K-Space anomaly score below threshold — image encoder not triggered.',

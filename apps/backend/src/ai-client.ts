@@ -54,6 +54,9 @@ export interface PredictResponse {
   kspace_gradcam_key: string | null
   kspace_log_mag_key: string | null
   reconstructed_gradcam_key: string | null
+  noise_severity: number | null
+  motion_severity: number | null
+  phase_severity: number | null
   message: string | null
 }
 
@@ -73,6 +76,9 @@ export interface AIInferenceResult {
   kspaceGradcamKey: string | null
   kspaceLogMagKey: string | null
   reconstructedGradcamKey: string | null
+  noiseSeverity: number | null
+  motionSeverity: number | null
+  phaseSeverity: number | null
 }
 
 // ---------------------------------------------------------------------------
@@ -151,6 +157,9 @@ export class AIServiceClient {
         ghostingScore: anomaly_scores.ghosting,
         wrapAroundScore: anomaly_scores.wrap_around,
         zipperScore: anomaly_scores.zipper_noise,
+        noiseSeverity: data.noise_severity,
+        motionSeverity: data.motion_severity,
+        phaseSeverity: data.phase_severity,
         compositeScore: anomaly_scores.composite_score,
         anomalyDetected: gating_decision.anomaly_detected,
         threshold: gating_decision.threshold_used,
@@ -198,6 +207,9 @@ export class AIServiceClient {
       kspaceGradcamKey: kspace_gradcam_key ?? null,
       kspaceLogMagKey: kspace_log_mag_key ?? null,
       reconstructedGradcamKey: reconstructed_gradcam_key ?? null,
+      noiseSeverity: data.noise_severity ?? null,
+      motionSeverity: data.motion_severity ?? null,
+      phaseSeverity: data.phase_severity ?? null,
     }
   }
 
