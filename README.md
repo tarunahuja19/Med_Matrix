@@ -25,7 +25,7 @@ graph TD
     E --> F[FastAPI /predict Endpoint]
     F --> G[Reconstruct Magnitude Image]
     G --> H[CNN Artifact Classifier]
-    H --> I{Composite score >= 0.5?}
+    H --> I{"Composite score >= 0.5?"}
     
     I -- Yes: Anomaly Detected --> J[Trigger Image Encoder: Motion Correction & Denoising]
     J --> K[Upload reconstructed.npy to 'reconstructed' bucket]
@@ -36,7 +36,7 @@ graph TD
     
     L & N --> O[Persist ModelResult, AnomalyDetection & GatingDecision in PostgreSQL via Prisma]
     O --> P[Compile PDF Report draft using Rust Engine]
-    P --> Q[Mark Study Status: Complete in Electronic Health Record (EHR)]
+    P --> Q["Mark Study Status: Complete in Electronic Health Record (EHR)"]
 ```
 
 ---
