@@ -1,18 +1,20 @@
 # 🧠 MedMatrix
 
-[![C++ Inference Test Suite](https://img.shields.io/badge/C%2B%2B%20Inference-10%2F10%20Passed-success)](file:///home/jemin/Projects/Med_Matrix/ai-service/inference)
-[![SSM Anomaly Test Suite](https://img.shields.io/badge/SSM%20Anomaly-9%2F9%20Passed-success)](file:///home/jemin/Projects/Med_Matrix/ai-service/inference)
-[![Node.js v20](https://img.shields.io/badge/Node.js-v20-blue)](file:///home/jemin/Projects/Med_Matrix/apps/backend)
-[![Python 3.10](https://img.shields.io/badge/Python-3.10-blue)](file:///home/jemin/Projects/Med_Matrix/ai-service)
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](file:///home/jemin/Projects/Med_Matrix/LICENSE)
+[![C++ Inference Test Suite](https://img.shields.io/badge/C%2B%2B%20Inference-10%2F10%20Passed-success)](ai-service/inference)
+[![SSM Anomaly Test Suite](https://img.shields.io/badge/SSM%20Anomaly-9%2F9%20Passed-success)](ai-service/inference)
+[![Node.js v20](https://img.shields.io/badge/Node.js-v20-blue)](apps/backend)
+[![Python 3.10](https://img.shields.io/badge/Python-3.10-blue)](ai-service)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-**MedMatrix** (also referred to as **KVISION // NeuroScan AI**) is a premium, monorepo-based clinical MRI volumetric analysis, anomaly detection, and automated reporting platform. It integrates state-of-the-art Deep Learning (Hybrid S4 State-Space Models + Spatial Convolutions) with high-performance native engines (C++ ONNX Runtime and Rust reconstruction routines) and a clinical desktop console (Electron + React) to deliver a seamless, high-throughput pipeline for radiologists.
+**KVISION** is a premium, monorepo-based clinical MRI volumetric analysis, anomaly detection, and automated reporting platform. It integrates state-of-the-art Deep Learning (Hybrid S4 State-Space Models + Spatial Convolutions) with high-performance native engines (C++ ONNX Runtime and Rust reconstruction routines) and a clinical desktop console (Electron + React) to deliver a seamless, high-throughput pipeline for radiologists.
 
 ---
 
 ## 🏛️ System Architecture & Workflow
 
 MedMatrix operates on an automated, two-tier AI cascade to optimize compute and preserve fine-grained structural details during MRI raw acquisition processing.
+
+👉 **[Read the Documentation](https://medmatrix.tarunahuja199.workers.dev/)**
 
 ```mermaid
 graph TD
@@ -55,12 +57,12 @@ graph TD
 ### 1. 3D Volumetric Brain & Lesion Visualizer
 Provides a real-time, interactive 3D mesh rendering of patient brains, overlaying detected tumor models, hemorrhage volumes, and lesion nodes in three dimensions using Three.js and VTK.js.
 
-![3D Brain Visualizer Interface](file:///home/jemin/Projects/Med_Matrix/assets/3d_visualizer_showcase.png)
+![3D Brain Visualizer Interface](assets/3d_visualizer_showcase.png)
 
 ### 2. 2D Clinical Slice Viewer
 A clinical-grade multi-planar slice viewer powered by Cornerstone3D, allowing radiologists to scroll through reconstructed axial, sagittal, and coronal slices, overlaying segmentation masks and AI-detected pathology logits.
 
-![2D Clinical Slice Viewer Interface](file:///home/jemin/Projects/Med_Matrix/assets/2d_slice_viewer_showcase.png)
+![2D Clinical Slice Viewer Interface](assets/2d_slice_viewer_showcase.png)
 
 ---
 
@@ -84,14 +86,14 @@ Med_Matrix/
 ```
 
 ### 🗂️ Documentation Quick Links:
-* **[Root README](file:///home/jemin/Projects/Med_Matrix/README.md)** (this file)
-* **[ai-service/README.md](file:///home/jemin/Projects/Med_Matrix/ai-service/README.md)** — Python AI microservice, PyTorch pipelines, and model details.
-* **[ai-service/inference/README.md](file:///home/jemin/Projects/Med_Matrix/ai-service/inference/README.md)** — High-performance C++ ONNX Runtime engine & builds.
-* **[apps/backend/README.md](file:///home/jemin/Projects/Med_Matrix/apps/backend/README.md)** — Express REST API, Prisma schema, PostgreSQL DB, and BullMQ worker.
-* **[apps/electron/README.md](file:///home/jemin/Projects/Med_Matrix/apps/electron/README.md)** — Desktop UI client main/preload/renderer structure and visualizations.
-* **[rust-mri/README.md](file:///home/jemin/Projects/Med_Matrix/rust-mri/README.md)** — Native Rust FFT slice reconstructions and PDF report compiler.
-* **[packages/README.md](file:///home/jemin/Projects/Med_Matrix/packages/README.md)** — Shared configurations and common type interfaces index.
-* **[second-brain/README.md](file:///home/jemin/Projects/Med_Matrix/second-brain/README.md)** — Obsidian vault documentation index and developer logs.
+* **[Root README](README.md)** (this file)
+* **[ai-service/README.md](ai-service/README.md)** — Python AI microservice, PyTorch pipelines, and model details.
+* **[ai-service/inference/README.md](ai-service/inference/README.md)** — High-performance C++ ONNX Runtime engine & builds.
+* **[apps/backend/README.md](apps/backend/README.md)** — Express REST API, Prisma schema, PostgreSQL DB, and BullMQ worker.
+* **[apps/electron/README.md](apps/electron/README.md)** — Desktop UI client main/preload/renderer structure and visualizations.
+* **[rust-mri/README.md](rust-mri/README.md)** — Native Rust FFT slice reconstructions and PDF report compiler.
+* **[packages/README.md](packages/README.md)** — Shared configurations and common type interfaces index.
+* **[second-brain/README.md](second-brain/README.md)** — Obsidian vault documentation index and developer logs.
 
 ---
 
