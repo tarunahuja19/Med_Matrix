@@ -21,6 +21,7 @@ model Patient {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   studies     Study[]
+  brainTwins  BrainTwin[]
 }
 
 model Study {
@@ -49,7 +50,9 @@ model Report {
   status            String    @default("draft") // draft, final
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
+  signOffs          RadiologistSignOff[]
 }
+
 
 // ---------------------------------------------------------------------------
 // Phase 2 — AI Model Result Tables
@@ -135,4 +138,59 @@ model GatingDecision {
   reason                 String
 
   createdAt              DateTime    @default(now())
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3 — Digital Brain Twin & Workflow Tables
+// ---------------------------------------------------------------------------
+
+model BrainTwin {
+  id              String               @id @default(uuid())
+  patientId       String
+  patient         Patient              @relation(fields: [patientId], references: [id])
+  stateVector     Bytes                // Serialized brain state s(t)
+  stateTimestamp  DateTime             // When this state was computed
+  version         Int                  @default(1)
+  createdAt       DateTime             @default(now())
+  trajectories    Trajectory[]
+  simulations     TreatmentSimulation[]
+}
+
+model Trajectory {
+  id              String               @id @default(uuid())
+  brainTwinId     String
+  brainTwin       BrainTwin            @relation(fields: [brainTwinId], references: [id])
+  timepoints      Json                 // Array of {month, volumes, severity, cognitive}
+  uncertaintyBand Json                 // 90% CI bounds
+  createdAt       DateTime             @default(now())
+}
+
+model TreatmentSimulation {
+  id              String               @id @default(uuid())
+  brainTwinId     String
+  brainTwin       BrainTwin            @relation(fields: [brainTwinId], references: [id])
+  treatmentPlan   Json                 // {name, drugs, schedule}
+  predictedOutcome Json                // {trajectory, confidence, comparison}
+  createdAt       DateTime             @default(now())
+}
+
+model RadiologistSignOff {
+  id              String               @id @default(uuid())
+  reportId        String
+  report          Report               @relation(fields: [reportId], references: [id])
+  radiologistName String
+  status          String               @default("pending") // pending, approved, rejected, amended
+  amendments      String?              // Free text corrections
+  signedAt        DateTime?
+  createdAt       DateTime             @default(now())
+}
+
+model AuditLog {
+  id              String               @id @default(uuid())
+  userId          String
+  action          String               // "viewed_report", "signed_off", "ran_simulation", etc.
+  resourceType    String               // "Study", "Report", "BrainTwin", etc.
+  resourceId      String
+  metadata        Json?
+  createdAt       DateTime             @default(now())
 }

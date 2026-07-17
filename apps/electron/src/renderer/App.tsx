@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
+import DigitalBrainTwinView from './components/DigitalBrainTwin'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -77,7 +78,7 @@ interface ProgressionResponse {
 }
 
 // ── Tabs ─────────────────────────────────────────────────────────────────────
-type Tab = 'ingest' | 'archive' | 'patients' | 'reports' | 'brain3d' | 'analytics'
+type Tab = 'ingest' | 'archive' | 'patients' | 'reports' | 'brain3d' | 'twin' | 'analytics'
 
 const SIMULATED_DISEASES = [
   'Normal',
@@ -2211,6 +2212,7 @@ export default function App() {
   // navigation
   const [tab, setTab] = useState<Tab>('ingest')
   const [brain3dSelectedPatientId, setBrain3dSelectedPatientId] = useState<string>('')
+  const [twinSelectedPatientId, setTwinSelectedPatientId] = useState<string>('')
 
   // data
   const [patients, setPatients] = useState<Patient[]>([])
@@ -2792,6 +2794,7 @@ export default function App() {
     { id: 'patients', label: 'Patients' },
     { id: 'reports', label: 'AI Reports' },
     { id: 'brain3d', label: '3D Brain Model' },
+    { id: 'twin', label: 'Digital Brain Twin' },
     { id: 'analytics', label: 'Analytics' },
   ]
 
@@ -3204,7 +3207,7 @@ export default function App() {
         {tab === 'archive' && (
           <>
             {/* Left: study list */}
-            <div className="syngo-panel">
+            <div className="syngo-panel" style={{ height: '100%', minHeight: 0 }}>
               <div className="panel-header">
                 <span>Clinical Study Archive</span>
                 <button onClick={fetchStudies} className="clinical-btn" style={{ padding: '2px 8px', fontSize: '10px' }}>
@@ -3255,7 +3258,7 @@ export default function App() {
             </div>
 
             {/* Right: study inspector */}
-            <div className="syngo-panel">
+            <div className="syngo-panel" style={{ height: '100%', minHeight: 0 }}>
               <div className="panel-header">
                 <span>Study Inspector</span>
                 <span style={{ fontFamily: 'var(--font-mono)' }}>[INSPECTOR]</span>
@@ -3352,7 +3355,7 @@ export default function App() {
 
                     {selectedStudy.status === 'complete' && (() => {
                       const studyReport = reports.find((rp) => rp.studyId === selectedStudy.id)
-                      const studyFindings = parseFindings(studyReport?.findings)
+                      const studyFindings = parseFindings(studyReport?.findings ?? null)
                       const pathology = studyFindings?.predictedPathology || 'Normal'
                       const confidence = studyFindings?.pathologyConfidence ?? studyFindings?.confidence ?? 0.95
 
@@ -3865,7 +3868,7 @@ export default function App() {
                                   />
                                 ) : (
                                   <div style={{ color: '#2d3748', fontSize: '13px', fontFamily: 'var(--font-sans)', lineHeight: '1.6' }}>
-                                    {renderFormattedReportText(reportSubTab === 'radiologist' ? selectedReport.impression : selectedReport.patientImpression)}
+                                    {renderFormattedReportText(reportSubTab === 'radiologist' ? selectedReport.impression : (selectedReport.patientImpression ?? null))}
                                   </div>
                                 )}
                               </div>
@@ -4200,6 +4203,16 @@ export default function App() {
             </div>
           </>
         )}
+
+        {/* ═══════════════════════════════════ DIGITAL BRAIN TWIN TAB ══════════════════════════════════ */}
+        {tab === 'twin' && (
+          <DigitalBrainTwinView
+            patients={patients}
+            activePatientId={twinSelectedPatientId}
+            onSelectPatient={setTwinSelectedPatientId}
+          />
+        )}
+
 
         {/* ═══════════════════════════════════ ANALYTICS TAB ══════════════════════════════════ */}
         {tab === 'analytics' && (() => {

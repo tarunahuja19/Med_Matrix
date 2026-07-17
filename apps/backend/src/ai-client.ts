@@ -233,7 +233,7 @@ export class AIServiceClient {
       const res = await this.http.post<{ status: string; report: string }>('/rag/query', {
         disease_name: diseaseName,
         patient_metadata: patientMetadata,
-        llm_model: 'gemini-3.5-flash',
+        llm_model: 'gemini-3.1-flash-lite',
         for_patient: forPatient ?? false,
       })
       if (res.data && res.data.status === 'success') {

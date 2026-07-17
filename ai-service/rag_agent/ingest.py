@@ -2,18 +2,16 @@ import os
 import re
 import json
 import logging
-from upstash_redis import Redis
+import redis
 import google.generativeai as genai
 from rag_agent.gemini_client import call_gemini_with_retry
 
 logger = logging.getLogger("rag-agent-ingest")
 
 def get_redis_client():
-    url = os.getenv("UPSTASH_REDIS_REST_URL")
-    token = os.getenv("UPSTASH_REDIS_REST_TOKEN")
-    if not url or not token:
-        raise ValueError("Upstash Redis credentials (UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN) missing in environment")
-    return Redis(url=url, token=token)
+    redis_host = os.getenv("REDIS_HOST", "redis")
+    redis_port = int(os.getenv("REDIS_PORT", "6379"))
+    return redis.Redis(host=redis_host, port=redis_port, db=0)
 
 def parse_markdown_file(file_path):
     """

@@ -6,8 +6,8 @@ import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 import torchvision.models as models
 
-# Global model instance for default inference
-_MODEL_INSTANCE = None
+# Global model instances cache
+_MODEL_INSTANCES = {}
 
 
 class CustomCNN(nn.Module):
@@ -202,14 +202,15 @@ def detect_artifacts(
     if model_path is not None:
         model = get_model(model_type=model_type, weights_path=model_path, device=device_obj)
     else:
-        if _MODEL_INSTANCE is None:
+        if model_type not in _MODEL_INSTANCES:
             # Check default path
             default_weights = os.path.join(os.path.dirname(__file__), 'artifact_detector.pth')
-            if os.path.exists(default_weights):
-                _MODEL_INSTANCE = get_model(model_type=model_type, weights_path=default_weights, device=device_obj)
+            # Only load the default weights if model_type is resnet18 (since they are resnet18 weights)
+            if os.path.exists(default_weights) and model_type == 'resnet18':
+                _MODEL_INSTANCES[model_type] = get_model(model_type=model_type, weights_path=default_weights, device=device_obj)
             else:
-                _MODEL_INSTANCE = get_model(model_type=model_type, weights_path=None, device=device_obj)
-        model = _MODEL_INSTANCE
+                _MODEL_INSTANCES[model_type] = get_model(model_type=model_type, weights_path=None, device=device_obj)
+        model = _MODEL_INSTANCES[model_type]
         
     # Preprocess image
     tensor = preprocess_image(image)

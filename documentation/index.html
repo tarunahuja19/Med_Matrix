@@ -1,0 +1,897 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>KVision</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <!-- HEADER -->
+  <header>
+    <a class="logo" href="#overview">
+      <div class="logo-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 26px; height: 26px;">
+          <rect x="3" y="3" width="18" height="18" rx="2" fill="none"/>
+          <line x1="9" y1="3" x2="9" y2="21"/>
+          <line x1="15" y1="3" x2="15" y2="21"/>
+          <line x1="3" y1="9" x2="21" y2="9"/>
+          <line x1="3" y1="15" x2="21" y2="15"/>
+        </svg>
+      </div>
+      KVISION
+    </a>
+    <div class="header-links">
+      <a href="#overview">Overview</a>
+      <a href="#simulator">Simulator</a>
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: var(--accent); font-weight: 600;" id="live-timestamp">2026-06-22 17:52:53</span>
+      <a href="https://github.com/tarunahuja19/Med_Matrix" target="_blank" class="gh-btn">
+        GitHub
+      </a>
+    </div>
+  </header>
+
+  <!-- LAYOUT -->
+  <div class="layout">
+
+    <!-- SIDEBAR NAV -->
+    <nav class="sidebar">
+      <div class="sidebar-search" style="padding: 0 16px 10px;">
+        <input type="text" id="doc-search" placeholder="Filter directory / sections..." style="width: 100%; padding: 6px 10px; font-size: 13px; border: 1px solid var(--border); border-radius: 6px; outline: none; transition: border 0.15s ease;" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'" />
+      </div>
+
+      <div class="nav-section">Overview</div>
+      <a href="#overview" class="active">Workspace Overview</a>
+      <a href="#frontend">Electron Frontend</a>
+      <a href="#backend">Express Backend</a>
+
+      <div class="nav-section">Core Services</div>
+      <a href="#ai-service">Python AI Service</a>
+      <a href="#cpp-inference">C++ Inference Engine</a>
+      <a href="#db-schema">Database Schema</a>
+
+      <div class="nav-section">Interactive Console</div>
+      <a href="#simulator">Pipeline Simulator</a>
+
+      <!-- Status variables panel inside navigation -->
+      <div class="system-status-box" style="margin: 24px 16px 0; padding: 12px; border: 1px solid var(--border); border-radius: 6px; background: #ffffff; box-shadow: var(--shadow); font-size: 12px;">
+        <div class="status-row" style="display:flex; justify-content:space-between; margin-bottom: 6px;">
+          <span style="color: var(--muted); font-weight:500;">FastAPI Service:</span>
+          <span style="color: var(--green); font-weight:600; display:flex; align-items:center; gap:4px;"><span style="width:6px; height:6px; background:var(--green); border-radius:50%; display:inline-block;"></span>ONLINE</span>
+        </div>
+        <div class="status-row" style="display:flex; justify-content:space-between; margin-bottom: 6px;">
+          <span style="color: var(--muted); font-weight:500;">C++ CUDA Core:</span>
+          <span style="color: var(--accent); font-weight:600;">CUDA-12.4</span>
+        </div>
+        <div class="status-row" style="display:flex; justify-content:space-between; margin-bottom: 6px;">
+          <span style="color: var(--muted); font-weight:500;">Redis Queue:</span>
+          <span style="color: var(--text); font-weight:500;">127.0.0.1</span>
+        </div>
+        <div class="status-row" style="display:flex; justify-content:space-between;">
+          <span style="color: var(--muted); font-weight:500;">MinIO Bucket:</span>
+          <span style="color: var(--green); font-weight:600; display:flex; align-items:center; gap:4px;"><span style="width:6px; height:6px; background:var(--green); border-radius:50%; display:inline-block;"></span>CONNECTED</span>
+        </div>
+      </div>
+    </nav>
+
+    <!-- MAIN CONTENT -->
+    <main>
+
+      <!-- OVERVIEW -->
+      <section class="section hero" id="overview">
+        <h1>MedMatrix Workspace Architecture</h1>
+        <p class="lead">
+          Welcome to the developer workstation technical manual. <strong>KVISION</strong>  is a modular clinical application designed for high-performance MRI acquisition preprocessing, State Space Model (SSM) anomaly detection, Fourier-domain reconstruction, and volumetric neural network pathology classification.
+        </p>
+
+        <div class="callout">
+          <strong>📦 Monorepo design</strong>
+          The workspace uses a Monorepo design managed with <code>pnpm</code> workspaces, synchronizing a high-performance C++ ONNX inference library, a FastAPI deep learning pipeline, an Express.js job worker backend, and an Electron desktop framework.
+        </div>
+
+        <h2>Enhanced Folder Explorer</h2>
+        <p>Click on any folder to toggle sub-directories, or click a file to load its clinical architecture details below:</p>
+
+        <!-- Interactive Visual Folder Tree Component -->
+        <div class="enhanced-tree" id="visual-explorer-tree">
+          
+          <!-- Root: docker-compose.yml -->
+          <div class="tree-node file level-0" data-path="docker-compose.yml" data-badge="config" data-desc="Backing services orchestrator. Deploys local PostgreSQL 16, Redis Cache, MinIO S3 Server, and binds networks for local Express and Python API services.">
+            <span class="tree-expander"></span>
+            <span class="tree-icon">📄</span>
+            <span class="tree-label">docker-compose.yml</span>
+            <div class="tree-meta">
+              <span class="tech-badge badge-config">DOCKER</span>
+              <span class="tree-desc">Orchestrates database, cache, and object storage</span>
+            </div>
+          </div>
+
+          <!-- Root: package.json -->
+          <div class="tree-node file level-0" data-path="package.json" data-badge="config" data-desc="Monorepo package manager entrypoint. Maps build steps, executes ESLint configurations, and manages core dev dependencies.">
+            <span class="tree-expander"></span>
+            <span class="tree-icon">📄</span>
+            <span class="tree-label">package.json</span>
+            <div class="tree-meta">
+              <span class="tech-badge badge-config">CONFIG</span>
+              <span class="tree-desc">Monorepo scripts registry</span>
+            </div>
+          </div>
+
+          <!-- Root: pnpm-workspace.yaml -->
+          <div class="tree-node file level-0" data-path="pnpm-workspace.yaml" data-badge="config" data-desc="Specifies the workspace directories to resolve internal dependencies dynamically across frontends, backends, and packages.">
+            <span class="tree-expander"></span>
+            <span class="tree-icon">📄</span>
+            <span class="tree-label">pnpm-workspace.yaml</span>
+            <div class="tree-meta">
+              <span class="tech-badge badge-config">CONFIG</span>
+              <span class="tree-desc">PNPM workspaces list</span>
+            </div>
+          </div>
+
+          <!-- Folder: ai-service -->
+          <div class="tree-node folder level-0" id="fold-ai-service">
+            <span class="tree-expander">▼</span>
+            <span class="tree-icon">📁</span>
+            <span class="tree-label">ai-service/</span>
+            <div class="tree-meta">
+              <span class="tree-desc">Python AI Engine & FastAPI</span>
+            </div>
+          </div>
+
+          <!-- Children of ai-service -->
+          <div class="tree-children" id="child-ai-service">
+            
+            <div class="tree-node file level-1" data-path="ai-service/fused_model_128.onnx" data-badge="py" data-desc="Trained volumetric classification checkpoint exported to ONNX Format. It processes [Batch, 8, 16, 128, 128, 2] inputs, outputting disease scores. Size: 4.3 MB.">
+              <span class="tree-expander"></span>
+              <span class="tree-icon">📄</span>
+              <span class="tree-label">fused_model_128.onnx</span>
+              <div class="tree-meta">
+                <span class="tech-badge badge-py">ONNX</span>
+                <span class="tree-desc">Volumetric pathology weights</span>
+              </div>
+            </div>
+
+            <div class="tree-node file level-1" data-path="ai-service/anomaly_detector.onnx" data-badge="py" data-desc="SSM-based K-Space Anomaly Estimator ONNX model. Processes [Batch, 32, 256, 256] input shapes, outputting noise, motion, and phase severities. Size: 5.9 MB.">
+              <span class="tree-expander"></span>
+              <span class="tree-icon">📄</span>
+              <span class="tree-label">anomaly_detector.onnx</span>
+              <div class="tree-meta">
+                <span class="tech-badge badge-py">ONNX</span>
+                <span class="tree-desc">SSM Anomaly Estimator weights</span>
+              </div>
+            </div>
+
+            <div class="tree-node file level-1" data-path="ai-service/main.py" data-badge="py" data-desc="FastAPI entrypoint. Spawns endpoints (/predict, /reconstruct) using Uvicorn. Connects raw python scripts to Express.js job queue.">
+              <span class="tree-expander"></span>
+              <span class="tree-icon">📄</span>
+              <span class="tree-label">main.py</span>
+              <div class="tree-meta">
+                <span class="tech-badge badge-py">PYTHON</span>
+                <span class="tree-desc">FastAPI controller application</span>
+              </div>
+            </div>
+
+            <div class="tree-node file level-1" data-path="ai-service/kspace_reader.py" data-badge="py" data-desc="MRI raw binary parser. Supports reading Twix files (.dat), fastMRI clinical datasets (.h5), and direct numpy inputs.">
+              <span class="tree-expander"></span>
+              <span class="tree-icon">📄</span>
+              <span class="tree-label">kspace_reader.py</span>
+              <div class="tree-meta">
+                <span class="tech-badge badge-py">PYTHON</span>
+                <span class="tree-desc">Siemens Twix & H5 Reader</span>
+              </div>
+            </div>
+
+            <div class="tree-node file level-1" data-path="ai-service/reconstruction.py" data-badge="py" data-desc="Performs Fourier transform on frequency matrices. Applies 2D Inverse Fast Fourier Transform (IFFT) and Root-Sum-of-Squares (RSS) combination on multi-coil channels.">
+              <span class="tree-expander"></span>
+              <span class="tree-icon">📄</span>
+              <span class="tree-label">reconstruction.py</span>
+              <div class="tree-meta">
+                <span class="tech-badge badge-py">PYTHON</span>
+                <span class="tree-desc">2D IFFT & RSS Combination</span>
+              </div>
+            </div>
+
+            <!-- Sub-folder: inference -->
+            <div class="tree-node folder level-1" id="fold-ai-inference">
+              <span class="tree-expander">▼</span>
+              <span class="tree-icon">📁</span>
+              <span class="tree-label">inference/</span>
+              <div class="tree-meta">
+                <span class="tree-desc">C++ Inference Engine</span>
+              </div>
+            </div>
+
+            <!-- Children of inference -->
+            <div class="tree-children" id="child-ai-inference">
+              
+              <div class="tree-node file level-2" data-path="ai-service/inference/CMakeLists.txt" data-badge="config" data-desc="CMake file resolving ONNX Runtime shared objects and CUDA Toolkit configuration paths for C++ binary compilation.">
+                <span class="tree-expander"></span>
+                <span class="tree-icon">📄</span>
+                <span class="tree-label">CMakeLists.txt</span>
+                <div class="tree-meta">
+                  <span class="tech-badge badge-config">CMAKE</span>
+                  <span class="tree-desc">CMake compiler definition</span>
+                </div>
+              </div>
+
+              <div class="tree-node file level-2" data-path="ai-service/inference/kvision_inference.h" data-badge="rs" data-desc="Header file mapping pathology enums and defining shapes like [1, 8, 16, 128, 128, 2] elements to bind flat pointers in ORT Memory.">
+                <span class="tree-expander"></span>
+                <span class="tree-icon">📄</span>
+                <span class="tree-label">kvision_inference.h</span>
+                <div class="tree-meta">
+                  <span class="tech-badge badge-rs">C++ HEADER</span>
+                  <span class="tree-desc">Inference engine header mapping</span>
+                </div>
+              </div>
+
+              <div class="tree-node file level-2" data-path="ai-service/inference/kvision_inference.cpp" data-badge="rs" data-desc="C++ engine runtime. Initiates Ort::Env environment, registers CUDA Execution Provider, maps pointers to tensors, runs forward pass, and computes softmax.">
+                <span class="tree-expander"></span>
+                <span class="tree-icon">📄</span>
+                <span class="tree-label">kvision_inference.cpp</span>
+                <div class="tree-meta">
+                  <span class="tech-badge badge-rs">C++ IMPL</span>
+                  <span class="tree-desc">ONNX Runtime C++ implementation</span>
+                </div>
+              </div>
+
+              <div class="tree-node file level-2" data-path="ai-service/inference/test_inference.cpp" data-badge="rs" data-desc="Testing suite carrying out 10 CLI validation checks verifying model limits, outputs, CUDA precision, and throughput rates.">
+                <span class="tree-expander"></span>
+                <span class="tree-icon">📄</span>
+                <span class="tree-label">test_inference.cpp</span>
+                <div class="tree-meta">
+                  <span class="tech-badge badge-rs">C++ TEST</span>
+                  <span class="tree-desc">Inference test CLI suite</span>
+                </div>
+              </div>
+
+            </div>
+
+          </div>
+
+          <!-- Folder: apps -->
+          <div class="tree-node folder level-0" id="fold-apps">
+            <span class="tree-expander">▼</span>
+            <span class="tree-icon">📁</span>
+            <span class="tree-label">apps/</span>
+            <div class="tree-meta">
+              <span class="tree-desc">UI Frontend & API Backend</span>
+            </div>
+          </div>
+
+          <!-- Children of apps -->
+          <div class="tree-children" id="child-apps">
+            
+            <!-- Sub-folder: electron -->
+            <div class="tree-node folder level-1" id="fold-apps-electron">
+              <span class="tree-expander">▼</span>
+              <span class="tree-icon">📁</span>
+              <span class="tree-label">electron/</span>
+              <div class="tree-meta">
+                <span class="tree-desc">Electron desktop app</span>
+              </div>
+            </div>
+
+            <!-- Children of electron -->
+            <div class="tree-children" id="child-apps-electron">
+              
+              <div class="tree-node file level-2" data-path="apps/electron/src/renderer/App.tsx" data-badge="ts" data-desc="Primary React workstation component. Handles tabs rendering, links custom dashboard layouts, manages Cornerstone3D viewports, and displays AI Reports.">
+                <span class="tree-expander"></span>
+                <span class="tree-icon">📄</span>
+                <span class="tree-label">App.tsx</span>
+                <div class="tree-meta">
+                  <span class="tech-badge badge-ts">TSX / REACT</span>
+                  <span class="tree-desc">Main desktop interface root</span>
+                </div>
+              </div>
+
+              <div class="tree-node file level-2" data-path="apps/electron/src/renderer/index.css" data-badge="ts" data-desc="Styles registry implementing the default clinical aesthetic theme layouts, bevel reliefs, and scanlines.">
+                <span class="tree-expander"></span>
+                <span class="tree-icon">📄</span>
+                <span class="tree-label">index.css</span>
+                <div class="tree-meta">
+                  <span class="tech-badge badge-ts">VANILLA CSS</span>
+                  <span class="tree-desc">Clinical stylesheet layout</span>
+                </div>
+              </div>
+
+            </div>
+
+            <!-- Sub-folder: backend -->
+            <div class="tree-node folder level-1" id="fold-apps-backend">
+              <span class="tree-expander">▼</span>
+              <span class="tree-icon">📁</span>
+              <span class="tree-label">backend/</span>
+              <div class="tree-meta">
+                <span class="tree-desc">Express API & BullMQ</span>
+              </div>
+            </div>
+
+            <!-- Children of backend -->
+            <div class="tree-children" id="child-apps-backend">
+              
+              <div class="tree-node file level-2" data-path="apps/backend/prisma/schema.prisma" data-badge="db" data-desc="Prisma database mapping: Patient, Study, Report, ModelResult, AnomalyDetection, and GatingDecision relational records.">
+                <span class="tree-expander"></span>
+                <span class="tree-icon">📄</span>
+                <span class="tree-label">schema.prisma</span>
+                <div class="tree-meta">
+                  <span class="tech-badge badge-db">PRISMA</span>
+                  <span class="tree-desc">Postgres relational schema</span>
+                </div>
+              </div>
+
+              <div class="tree-node file level-2" data-path="apps/backend/src/worker.ts" data-badge="ts" data-desc="BullMQ worker backed by Redis. Processes async study-processing tasks, calls the python predict cascade, and persists results.">
+                <span class="tree-expander"></span>
+                <span class="tree-icon">📄</span>
+                <span class="tree-label">worker.ts</span>
+                <div class="tree-meta">
+                  <span class="tech-badge badge-ts">TYPESCRIPT</span>
+                  <span class="tree-desc">Background job processor</span>
+                </div>
+              </div>
+
+              <div class="tree-node file level-2" data-path="apps/backend/src/ai-client.ts" data-badge="ts" data-desc="Axios REST wrapper querying FastAPI endpoints on /predict, fetching scores and sending reconstructed keys back.">
+                <span class="tree-expander"></span>
+                <span class="tree-icon">📄</span>
+                <span class="tree-label">ai-client.ts</span>
+                <div class="tree-meta">
+                  <span class="tech-badge badge-ts">TYPESCRIPT</span>
+                  <span class="tree-desc">AI Service Axios client</span>
+                </div>
+              </div>
+
+            </div>
+
+          </div>
+
+          <!-- Folder: rust-mri -->
+          <div class="tree-node folder level-0" id="fold-rust-mri">
+            <span class="tree-expander">▼</span>
+            <span class="tree-icon">📁</span>
+            <span class="tree-label">rust-mri/</span>
+            <div class="tree-meta">
+              <span class="tree-desc">High-Performance Rust Prototype</span>
+            </div>
+          </div>
+
+          <!-- Children of rust-mri -->
+          <div class="tree-children" id="child-rust-mri">
+            
+            <div class="tree-node file level-1" data-path="rust-mri/Cargo.toml" data-badge="rs" data-desc="Rust configuration cargo file. Imports fast Fourier transform library 'rustfft' and complex numbers processor 'num-complex' for offline simulations.">
+              <span class="tree-expander"></span>
+              <span class="tree-icon">📄</span>
+              <span class="tree-label">Cargo.toml</span>
+              <div class="tree-meta">
+                <span class="tech-badge badge-rs">RUST CARGO</span>
+                <span class="tree-desc">Cargo configuration details</span>
+              </div>
+            </div>
+
+            <div class="tree-node file level-1" data-path="rust-mri/src/main.rs" data-badge="rs" data-desc="Rust entrypoint carrying out Fourier transforms on multi-channel complex values for benchmarking.">
+              <span class="tree-expander"></span>
+              <span class="tree-icon">📄</span>
+              <span class="tree-label">main.rs</span>
+              <div class="tree-meta">
+                <span class="tech-badge badge-rs">RUST SOURCE</span>
+                <span class="tree-desc">Fourier Transform execution core</span>
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+
+        <!-- Dynamic Explorer Details Card -->
+        <div class="explorer-details-card" id="details-card-popover">
+          <div class="details-card-header">
+            <div class="details-card-title" id="details-node-path">FILE_PATH</div>
+            <span class="tech-badge" id="details-node-badge">TECH</span>
+          </div>
+          <div class="details-card-desc" id="details-node-desc">File details will be generated here.</div>
+        </div>
+
+        <h2>Technology Stack Matrix</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Component</th>
+              <th>Core Technology</th>
+              <th>Primary Libraries / Specs</th>
+              <th>Purpose</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Frontend UI</strong></td>
+              <td>Electron + React + TS</td>
+              <td>Cornerstone3D, Recharts, Three.js / VTK.js</td>
+              <td>Utilitarian workstation GUI, 3D brain/lesion rendering</td>
+            </tr>
+            <tr>
+              <td><strong>App Backend</strong></td>
+              <td>Node.js Express + TS</td>
+              <td>Prisma, PostgreSQL 16, BullMQ, Redis, MinIO SDK</td>
+              <td>Database persistence, DICOM upload routing, async worker queue</td>
+            </tr>
+            <tr>
+              <td><strong>AI Service</strong></td>
+              <td>FastAPI + PyTorch</td>
+              <td>SimpleITK, NumPy, scikit-image, h5py</td>
+              <td>Reconstruction algorithms, registration, model training</td>
+            </tr>
+            <tr>
+              <td><strong>C++ Engine</strong></td>
+              <td>C++17 (CMake)</td>
+              <td>ONNX Runtime v1.24.4, CUDA Toolkit, Protobuf</td>
+              <td>Sub-12ms high-throughput volumetric pathology prediction</td>
+            </tr>
+            <tr>
+              <td><strong>Rust Subsystem</strong></td>
+              <td>Rust Cargo</td>
+              <td>rustfft, num-complex, printpdf, image</td>
+              <td>Prototype library for high-speed offline reconstructions</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- ELECTRON FRONTEND -->
+      <section class="section" id="frontend">
+        <h2>Electron Desktop Application</h2>
+        <p class="lead">
+          The user interface mimics a medical diagnostic screen, built on <strong>Electron (v29)</strong> running a <strong>React (v18)</strong> application with TypeScript.
+        </p>
+
+        <div class="callout">
+          <strong>Clinical Modern Design Theme</strong>
+          The styling utilizes a high-contrast layout, high-density data panels, a border system, typography, and an optional CRT scanning line overlay in its dark workstation mode.
+        </div>
+
+        <h3>Core Modules in App.tsx</h3>
+        <p>The primary client controller coordinates four workstation states:</p>
+        <ul>
+          <li><strong>Ingest Tab</strong>: Manages DICOM uploads and raw K-Space arrays. Connects to backend endpoints and triggers MinIO uploads.</li>
+          <li><strong>Archive/Studies Tab</strong>: Presents a tabular index of patient scans, process states (pending, processing, complete, failed), and metadata.</li>
+          <li><strong>Patients Tab</strong>: Integrates clinical detail sheets, medical history logs, and risk factors.</li>
+          <li><strong>AI Reports Tab</strong>: Renders structured diagnosis recommendations, pathology classification graphs (Recharts), and interactive 3D visualizations.</li>
+        </ul>
+
+        <h3>3D Volumetric Visualizations</h3>
+        <p>To assist radiologists, the frontend integrates complex rendering libraries:</p>
+        <ul>
+          <li><strong>Cornerstone3D</strong>: Core viewport for slicing raw DICOM files, mapping pixel coordinates, window/leveling, and medical annotations.</li>
+          <li><strong>Three.js / VTK.js</strong>: Renders a 3D polygonal volume reconstruct of the brain. Highlights predicted pathology locations as glowing nodes with corresponding bounding boxes computed by the spatial attention models.</li>
+        </ul>
+
+        <div class="code-block">
+          <div class="code-header">
+            <span>apps/electron/src/renderer/index.css</span>
+            <button class="copy-btn">copy</button>
+          </div>
+          <pre><code><span class="cm">/* Siemens Syngo style grid layout definition */</span>
+<span class="kw">.syngo-layout</span> {
+  <span class="kw">display</span>: grid;
+  <span class="kw">grid-template-rows</span>: 40px 1fr 24px;
+  <span class="kw">height</span>: 100vh;
+}
+<span class="kw">.bevel-inset</span> {
+  <span class="kw">border</span>: 2px solid;
+  <span class="kw">border-color</span>: #8898a5 #ffffff #ffffff #8898a5;
+}
+<span class="kw">.clinical-btn-primary</span> {
+  <span class="kw">background</span>: linear-gradient(to bottom, #e3eeeb, #ccdcd7);
+  <span class="kw">border-color</span>: #799a8c;
+  <span class="kw">color</span>: var(--color-accent-green);
+  <span class="kw">font-weight</span>: bold;
+}</code></pre>
+        </div>
+      </section>
+
+      <!-- EXPRESS BACKEND -->
+      <section class="section" id="backend">
+        <h2>Node.js / Express Backend & Worker</h2>
+        <p class="lead">
+          The Express backend acts as the data hub, mapping PostgreSQL models via <strong>Prisma ORM</strong> and running heavy background jobs via <strong>BullMQ + Redis</strong>.
+        </p>
+        
+        <h3>Job Processing Pipeline</h3>
+        <p>Heavy computation is isolated from the main HTTP loop. The components are structured as follows:</p>
+        
+        <div class="steps">
+          <div class="step">
+            <div class="step-num">1</div>
+            <div class="step-body">
+              <div class="step-title">Express Router (routes/studies.ts)</div>
+              <div class="step-desc">Handles requests from the Electron app. When a user uploads a raw study, the server reads the DICOM headers using <code>dcmjs</code>, stores the files in MinIO under the <code>kspace-raw</code> bucket, creates a pending database study, and pushes a job to the BullMQ queue.</div>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">2</div>
+            <div class="step-body">
+              <div class="step-title">BullMQ Queue Manager (queue.ts)</div>
+              <div class="step-desc">Configures a task queue named <code>study-processing</code> backed by Redis. This decouples file uploads from GPU-heavy AI model predictions.</div>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">3</div>
+            <div class="step-body">
+              <div class="step-title">Background Worker (worker.ts)</div>
+              <div class="step-desc">Listens for jobs. For each job, it instantiates <code>AIServiceClient</code>, posts the data to FastAPI, parses results, and updates PostgreSQL states.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="code-block">
+          <div class="code-header">
+            <span>apps/backend/src/worker.ts</span>
+            <button class="copy-btn">copy</button>
+          </div>
+          <pre><code><span class="kw">import</span> { Worker, Job } <span class="kw">from</span> <span class="str">'bullmq'</span>;
+<span class="kw">import</span> { aiClient } <span class="kw">from</span> <span class="str">'./ai-client'</span>;
+<span class="kw">import</span> { prisma } <span class="kw">from</span> <span class="str">'./db'</span>;
+
+<span class="kw">export const</span> studyWorker = <span class="kw">new</span> <span class="fn">Worker</span>(<span class="str">'study-processing'</span>, <span class="kw">async</span> (job: <span class="var">Job</span>) => {
+  <span class="kw">const</span> { studyId } = job.data;
+  <span class="kw">await</span> prisma.study.<span class="fn">update</span>({ where: { id: studyId }, data: { status: <span class="str">'processing'</span> } });
+  
+  <span class="kw">try</span> {
+    <span class="cm">// Call Python/C++ FastAPI predictive cascade</span>
+    <span class="kw">const</span> aiResult = <span class="kw">await</span> aiClient.<span class="fn">predictStudy</span>(studyId);
+    
+    <span class="cm">// Persist results in PostgreSQL</span>
+    <span class="kw">await</span> prisma.$transaction([
+      prisma.modelResult.<span class="fn">create</span>({ data: { ... } }),
+      prisma.study.<span class="fn">update</span>({ where: { id: studyId }, data: { status: <span class="str">'complete'</span> } })
+    ]);
+  } <span class="kw">catch</span> (err) {
+    <span class="kw">await</span> prisma.study.<span class="fn">update</span>({ where: { id: studyId }, data: { status: <span class="str">'failed'</span> } });
+  }
+}, { connection: redisConn });</code></pre>
+        </div>
+
+        <h3>MinIO Object Storage</h3>
+        <p>Manages binary asset storage. Utilizes two S3 buckets: <code>kspace-raw</code> for uploaded numpy kspace matrices/DICOM files, and <code>reconstructed-magnitude</code> for the final parsed magnitude slices.</p>
+      </section>
+
+      <!-- PYTHON AI SERVICE -->
+      <section class="section" id="ai-service">
+        <h2>Python AI Service (FastAPI)</h2>
+        <p class="lead">
+          The AI service runs as a FastAPI microservice containing reconstruction pipelines, PyTorch neural networks, and model training routines.
+        </p>
+
+        <h3>Phase 2 Two-Tier Gating Flow</h3>
+        <p>To optimize CUDA memory, the application implements a cascading gateway mechanism before running the volumetric spatial classifier:</p>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Stage</th>
+              <th>Algorithm/Model</th>
+              <th>Input Shape</th>
+              <th>Gating Criteria / Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Tier 1: Anomaly Gating</strong></td>
+              <td>CNN Artifact Classifier / SSM Estimator</td>
+              <td><code>[Batch, 16, 128, 128]</code> magnitude / <code>[B, 32, 256, 256]</code> kspace</td>
+              <td>Computes artifact score. If <code>score >= 0.5</code>, triggers Tier 2. Otherwise, bypasses image models to save compute.</td>
+            </tr>
+            <tr>
+              <td><strong>Tier 2: Reconstruction</strong></td>
+              <td>SimpleITK Motion Correction + DnCNN Denoising</td>
+              <td><code>[Batch, 8, 128, 128]</code> magnitude images</td>
+              <td>Aligns corrupted slices via rigid registration and removes high-frequency acquisition noise.</td>
+            </tr>
+            <tr>
+              <td><strong>Tier 3: Pathology</strong></td>
+              <td>Fused S4-CNN Volumetric Model</td>
+              <td><code>[Batch, 8, 16, 128, 128, 2]</code> complex matrix</td>
+              <td>Fuses frequency and spatial representations to output class probabilities for 11 pathologies.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Volumetric Fused S4-CNN Architecture</h3>
+        <p>The production classification model (<code>fused_model_128.onnx</code>) uses a dual-branch encoder that fuses raw frequency acquisitions with spatial magnitude images:</p>
+        <ul>
+          <li><strong>Frequency Branch</strong>: Diagonal Continuous State Space Model (S4D) layers map raw flat K-space sequence data. It tracks phase encoding paths across 8 sequential slices in the complex frequency domain.</li>
+          <li><strong>Spatial Branch</strong>: Parameter-efficient Conv2D convolutions evaluate the magnitude reconstructions. Adaptive average pooling compresses spatial activations to a 128-dimensional latent vector.</li>
+          <li><strong>Slice Cross-Attention</strong>: The spatial query vectors interact with the frequency key/value vectors, generating a joint representation pooled for logit mapping.</li>
+        </ul>
+
+        <div class="callout">
+          <strong>Model Size Efficiency</strong>
+          By switching from a traditional 3D convolutional model (requiring ~67M parameters) to this hybrid S4-CNN architecture, total parameters dropped to just <strong>281,419</strong>. This enabled export to a lightweight 4.3 MB ONNX asset with negligible accuracy loss (88.28% validation score).
+        </div>
+      </section>
+
+      <!-- C++ INFERENCE ENGINE -->
+      <section class="section" id="cpp-inference">
+        <h2>C++ Inference Engine & ONNX Runtime</h2>
+        <p class="lead">
+          For high-throughput diagnostic execution, model files are loaded by a C++ inference library (<code>ai-service/inference/</code>) compiled with <strong>ONNX Runtime v1.24.4</strong>.
+        </p>
+
+        <h3>Features & Performance</h3>
+        <ul>
+          <li><strong>CUDA Acceleration</strong>: Attempts to initialize the CUDA Execution Provider. Fallback to CPU execution is automatically handled on devices without discrete NVIDIA GPUs.</li>
+          <li><strong>Memory Binding</strong>: Binds raw input pointers directly to CPU/GPU buffers using <code>Ort::Value::CreateTensor</code> to avoid redundant copies of volumetric tensors.</li>
+          <li><strong>Softmax Post-processing</strong>: Computes numerically stable softmax directly in C++ before packing results.</li>
+          <li><strong>Multi-threading Control</strong>: Limits intra-op threads to 1 or 2 threads to prevent CPU spinlock thread thrashing under concurrent WebWorker schedules.</li>
+        </ul>
+
+        <h3>Throughput Statistics</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Backend</th>
+              <th>Average Latency (ms)</th>
+              <th>Throughput (Inferences/Sec)</th>
+              <th>Tests Passed</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>NVIDIA CUDA GPU</strong></td>
+              <td>11.8 ms</td>
+              <td>84.8 inf/sec</td>
+              <td>10 / 10</td>
+            </tr>
+            <tr>
+              <td><strong>CPU (4 Threads)</strong></td>
+              <td>79.2 ms</td>
+              <td>12.6 inf/sec</td>
+              <td>10 / 10</td>
+            </tr>
+            <tr>
+              <td><strong>SSM Anomaly (CPU)</strong></td>
+              <td>23.4 ms</td>
+              <td>42.8 inf/sec</td>
+              <td>9 / 9</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>C++ Engine API Definition</h3>
+        <div class="code-block">
+          <div class="code-header">
+            <span>ai-service/inference/kvision_inference.h</span>
+            <button class="copy-btn">copy</button>
+          </div>
+          <pre><code><span class="kw">#pragma once</span>
+
+<span class="kw">#include</span> <span class="str">&lt;memory&gt;</span>
+<span class="kw">#include</span> <span class="str">&lt;string&gt;</span>
+<span class="kw">#include</span> <span class="str">&lt;vector&gt;</span>
+<span class="kw">#include</span> <span class="str">&lt;array&gt;</span>
+
+<span class="kw">namespace</span> kvision {
+
+<span class="cm">/// Pathology class labels (11 classes matching training)</span>
+<span class="kw">enum class</span> Pathology : <span class="kw">int</span> {
+    Normal                  = 0,
+    Tumor_Glioma            = 1,
+    Ischemia                = 2,
+    MS_Lesions              = 3,
+    Hydrocephalus           = 4,
+    Atrophy                 = 5,
+    Hemorrhage              = 6,
+    Cerebral_Cyst           = 7,
+    Edema                   = 8,
+    AVM                     = 9,
+    Cerebral_Microbleeds    = 10
+};
+
+<span class="kw">struct</span> InferenceResult {
+    Pathology predicted_class;
+    <span class="kw">float</span>     confidence;
+    std::array&lt;<span class="kw">float</span>, 11&gt; logits;
+    std::array&lt;<span class="kw">float</span>, 11&gt; probabilities;
+    <span class="kw">double</span>    inference_time_ms;
+};
+
+<span class="kw">class</span> InferenceEngine {
+<span class="kw">public</span>:
+    <span class="kw">explicit</span> InferenceEngine(<span class="kw">const</span> InferenceConfig&amp; config);
+    ~InferenceEngine();
+
+    InferenceResult infer(<span class="kw">const</span> std::vector&lt;<span class="kw">float</span>&gt;&amp; kspace_data);
+    InferenceResult infer(<span class="kw">const</span> <span class="kw">float</span>* kspace_data, size_t num_elements);
+};
+
+} <span class="cm">// namespace kvision</span></code></pre>
+        </div>
+      </section>
+
+      <!-- DATABASE SCHEMA -->
+      <section class="section" id="db-schema">
+        <h2>Database Schema</h2>
+        <p class="lead">
+          Relational tables stored in PostgreSQL and mapped via Prisma. Focuses on patient archiving and AI gating checkpoints:
+        </p>
+
+        <div class="cards">
+          <!-- Patient Card -->
+          <div class="card">
+            <div class="card-icon">👤</div>
+            <div class="card-title">Patient</div>
+            <ul style="list-style: none; font-size: 13px; color: var(--muted); padding: 0;">
+              <li><code>id</code> (String / UUID)</li>
+              <li><code>name</code> (String)</li>
+              <li><code>dateOfBirth</code> (DateTime)</li>
+              <li><code>gender</code> (String)</li>
+              <li><code>phone</code> (String?)</li>
+            </ul>
+          </div>
+          <!-- Study Card -->
+          <div class="card">
+            <div class="card-icon">📁</div>
+            <div class="card-title">Study</div>
+            <ul style="list-style: none; font-size: 13px; color: var(--muted); padding: 0;">
+              <li><code>id</code> (String / UUID)</li>
+              <li><code>patientId</code> (String)</li>
+              <li><code>modality</code> (String)</li>
+              <li><code>status</code> (String)</li>
+              <li><code>dicomKey</code> (String?)</li>
+            </ul>
+          </div>
+          <!-- ModelResult Card -->
+          <div class="card">
+            <div class="card-icon">📊</div>
+            <div class="card-title">ModelResult</div>
+            <ul style="list-style: none; font-size: 13px; color: var(--muted); padding: 0;">
+              <li><code>id</code> (String / UUID)</li>
+              <li><code>studyId</code> (String)</li>
+              <li><code>modelName</code> (String)</li>
+              <li><code>modelVersion</code> (String)</li>
+              <li><code>confidenceScore</code> (Float)</li>
+            </ul>
+          </div>
+          <!-- AnomalyDetection Card -->
+          <div class="card">
+            <div class="card-icon">⚡</div>
+            <div class="card-title">AnomalyDetection</div>
+            <ul style="list-style: none; font-size: 13px; color: var(--muted); padding: 0;">
+              <li><code>id</code> (String / UUID)</li>
+              <li><code>studyId</code> (String)</li>
+              <li><code>ghostingScore</code> (Float)</li>
+              <li><code>wrapAroundScore</code> (Float)</li>
+              <li><code>anomalyDetected</code> (Boolean)</li>
+            </ul>
+          </div>
+          <!-- GatingDecision Card -->
+          <div class="card">
+            <div class="card-icon">🛡️</div>
+            <div class="card-title">GatingDecision</div>
+            <ul style="list-style: none; font-size: 13px; color: var(--muted); padding: 0;">
+              <li><code>id</code> (String / UUID)</li>
+              <li><code>studyId</code> (String)</li>
+              <li><code>imageEncoderTriggered</code> (Boolean)</li>
+              <li><code>confidence</code> (Float)</li>
+              <li><code>reason</code> (String)</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- SIMULATOR -->
+      <section class="section" id="simulator">
+        <h2>Interactive MRI Pipeline Simulator</h2>
+        <p class="lead">
+          Adjust variables and trigger the dual-stage processing workflow. This runs a mathematical mockup mimicking the gating threshold equations, denoiser activation, and final volumetric pathology classifier logits.
+        </p>
+
+        <!-- Simulator Grid Wrapper -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 24px;">
+          
+          <!-- Column 1: Sliders & Controls -->
+          <div style="background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px; box-shadow: var(--shadow); height: fit-content;">
+            <h3 style="margin-top:0; margin-bottom: 16px; border-bottom: 1px solid var(--border); padding-bottom: 8px;">1. Simulator Inputs</h3>
+            
+            <div style="margin-bottom: 16px;">
+              <label style="display: block; font-weight: 500; font-size: 13.5px; margin-bottom: 6px; color: var(--text);">Pulse Sequence Contrast</label>
+              <select id="sim-contrast" style="width: 100%; padding: 8px 12px; font-size: 13.5px; border: 1px solid var(--border); border-radius: 6px; outline: none; background: #ffffff;">
+                <option value="0">T1-Weighted (Contrast: 0)</option>
+                <option value="1">T2-Weighted (Contrast: 1)</option>
+              </select>
+            </div>
+
+            <div style="margin-bottom: 16px;">
+              <div style="display:flex; justify-content:space-between; font-weight: 500; font-size: 13.5px; margin-bottom: 6px; color: var(--text);">
+                <span>Coil Noise Ratio</span>
+                <span style="font-family: 'IBM Plex Mono', monospace; color: var(--accent);" id="val-noise">0.12</span>
+              </div>
+              <input type="range" id="sim-noise" min="0" max="1" step="0.01" value="0.12" style="width: 100%; height: 6px; background: var(--border); border-radius: 3px; outline: none;" />
+            </div>
+
+            <div style="margin-bottom: 16px;">
+              <div style="display:flex; justify-content:space-between; font-weight: 500; font-size: 13.5px; margin-bottom: 6px; color: var(--text);">
+                <span>Patient Motion Severity</span>
+                <span style="font-family: 'IBM Plex Mono', monospace; color: var(--accent);" id="val-motion">0.05</span>
+              </div>
+              <input type="range" id="sim-motion" min="0" max="1" step="0.01" value="0.05" style="width: 100%; height: 6px; background: var(--border); border-radius: 3px; outline: none;" />
+            </div>
+
+            <div style="margin-bottom: 16px;">
+              <div style="display:flex; justify-content:space-between; font-weight: 500; font-size: 13.5px; margin-bottom: 6px; color: var(--text);">
+                <span>Phase Wrap-Around</span>
+                <span style="font-family: 'IBM Plex Mono', monospace; color: var(--accent);" id="val-wrap">0.08</span>
+              </div>
+              <input type="range" id="sim-wrap" min="0" max="1" step="0.01" value="0.08" style="width: 100%; height: 6px; background: var(--border); border-radius: 3px; outline: none;" />
+            </div>
+
+            <div style="margin-bottom: 20px;">
+              <div style="display:flex; justify-content:space-between; font-weight: 500; font-size: 13.5px; margin-bottom: 6px; color: var(--text);">
+                <span>Gating Threshold (Artifact limit)</span>
+                <span style="font-family: 'IBM Plex Mono', monospace; color: var(--accent);" id="val-threshold">0.50</span>
+              </div>
+              <input type="range" id="sim-threshold" min="0.1" max="0.9" step="0.05" value="0.50" style="width: 100%; height: 6px; background: var(--border); border-radius: 3px; outline: none;" />
+            </div>
+
+            <button class="gh-btn" id="run-simulation-btn" style="width:100%; padding:10px; font-weight: 600; display: flex; align-items:center; justify-content:center; gap: 8px; cursor:pointer;">
+              <span>RUN CLINICAL PIPELINE</span>
+            </button>
+          </div>
+
+          <!-- Column 2: Pipeline Nodes & Terminal Logs -->
+          <div style="display: flex; flex-direction: column; gap: 20px;">
+            
+            <!-- Pipeline flow steps style -->
+            <div style="background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 18px; box-shadow: var(--shadow);">
+              <div id="node-ingest" class="pipe-node-status" style="padding: 6px 12px; margin-bottom: 8px; border-radius: 4px; border: 1px solid var(--border); background: #ffffff; font-size: 12.5px; font-weight: 500; display:flex; align-items:center; gap:8px;">
+                <span class="status-indicator-dot" style="width:8px; height:8px; border-radius:50%; background:#94a3b8; display:inline-block;"></span>
+                INGEST: Raw Complex K-Space Uploaded
+              </div>
+              <div id="node-gating" class="pipe-node-status" style="padding: 6px 12px; margin-bottom: 8px; border-radius: 4px; border: 1px solid var(--border); background: #ffffff; font-size: 12.5px; font-weight: 500; display:flex; align-items:center; gap:8px;">
+                <span class="status-indicator-dot" style="width:8px; height:8px; border-radius:50%; background:#94a3b8; display:inline-block;"></span>
+                TIER 1: Anomaly Detector (SSM)
+              </div>
+              <div id="node-recon" class="pipe-node-status" style="padding: 6px 12px; margin-bottom: 8px; border-radius: 4px; border: 1px solid var(--border); background: #ffffff; font-size: 12.5px; font-weight: 500; display:flex; align-items:center; gap:8px;">
+                <span class="status-indicator-dot" style="width:8px; height:8px; border-radius:50%; background:#94a3b8; display:inline-block;"></span>
+                TIER 2: Rigid Registration & DnCNN Denoise
+              </div>
+              <div id="node-classify" class="pipe-node-status" style="padding: 6px 12px; border-radius: 4px; border: 1px solid var(--border); background: #ffffff; font-size: 12.5px; font-weight: 500; display:flex; align-items:center; gap:8px;">
+                <span class="status-indicator-dot" style="width:8px; height:8px; border-radius:50%; background:#94a3b8; display:inline-block;"></span>
+                TIER 3: Fused S4-CNN Pathology Classifier
+              </div>
+            </div>
+
+            <!-- Terminal System Output Logs -->
+            <div>
+              <h3 style="margin-top:0; font-size: 13px; margin-bottom: 6px; color: var(--muted); font-weight: 600;">Workstation System Output Logs</h3>
+              <div id="sim-console-output" style="background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 14px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #cbd5e1; height: 140px; overflow-y: auto; box-shadow: var(--shadow);">
+                <div style="color: #94a3b8;">[SYSTEM] Workstation initialized. Ready for pulse sequence input.</div>
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+
+        <!-- Pathology chart below simulator -->
+        <div style="background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px; box-shadow: var(--shadow); margin-top: 24px;">
+          <h3 style="margin-top:0; font-size: 14px; color: var(--accent); margin-bottom: 12px;">Pathology Probability Profiling (Logits Softmax)</h3>
+          <div id="chart-bars" style="display:flex; flex-direction:column; gap:8px;">
+            <!-- Bars filled dynamically by JS -->
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <footer>
+    <span>
+      <a href="https://github.com/tarunahuja19/Med_Matrix" target="_blank">GitHub</a>
+      <a href="#overview">Back to top ↑</a>
+    </span>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

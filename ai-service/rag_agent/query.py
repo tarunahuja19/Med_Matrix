@@ -105,7 +105,7 @@ def fetch_document_chunks(disease_name: str, redis_client) -> list:
     logger.error(f"Could not retrieve or ingest reference data for disease: {disease_name}")
     return []
 
-def generate_radiology_report(disease_name: str, patient_metadata: dict, llm_model: str = "gemini-3.5-flash", for_patient: bool = False) -> str:
+def generate_radiology_report(disease_name: str, patient_metadata: dict, llm_model: str = "gemini-3.1-flash-lite", for_patient: bool = False) -> str:
     """
     Main query pipeline for the RAG agent.
     Checks cache, runs vector similarity search if needed, calls LLM, and formats placeholders.

@@ -5,6 +5,7 @@ import { PrismaClient } from '@prisma/client'
 import { initBuckets } from './storage'
 import { startWorker } from './worker'
 import studiesRouter from './routes/studies'
+import twinsRouter from './routes/twins'
 import { aiClient } from './ai-client'
 import axios from 'axios'
 
@@ -56,6 +57,7 @@ app.get('/studies', async (_req, res) => {
 })
 
 app.use('/studies', studiesRouter)
+app.use('/twins', twinsRouter)
 
 // ── Reports ──────────────────────────────────────────────────────────────────
 app.get('/reports', async (_req, res) => {

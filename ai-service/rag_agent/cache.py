@@ -1,14 +1,14 @@
 import json
-from upstash_redis import Redis
-from rag_agent.config import UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN
+import redis
+import os
 
-# Initialize Upstash Redis client
-redis_client = None
-if UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN:
-    # Upstash REST URL sometimes contains quotes if loaded directly, strip them
-    url = UPSTASH_REDIS_REST_URL.strip('"\'')
-    token = UPSTASH_REDIS_REST_TOKEN.strip('"\'')
-    redis_client = Redis(url=url, token=token)
+# Initialize local Redis client connecting to docker service
+redis_host = os.getenv("REDIS_HOST", "redis")
+redis_port = int(os.getenv("REDIS_PORT", "6379"))
+try:
+    redis_client = redis.Redis(host=redis_host, port=redis_port, db=0)
+except Exception:
+    redis_client = None
 
 def get_age_bucket(age: int) -> str:
     """Helper to convert patient age into discrete buckets for cache efficiency."""

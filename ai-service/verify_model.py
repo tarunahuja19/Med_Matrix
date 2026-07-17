@@ -4,7 +4,8 @@ import numpy as np
 import torch
 
 from fused_model import FusedS4CNNClassifier
-from main import get_pathology_model, PATHOLOGY_CLASSES
+from services.model_loader import get_pathology_model
+from config import PATHOLOGY_CLASSES
 
 def main():
     print("=" * 60)
@@ -98,7 +99,7 @@ def main():
             predicted_class = PATHOLOGY_CLASSES[pred_idx]
             confidence = float(probs[pred_idx].item())
             
-        print("\n✓ Inference completed successfully!")
+        print("\nSuccess! Inference completed successfully!")
         print(f"Predicted Pathology: {predicted_class}")
         print(f"Confidence: {confidence:.4f}")
         print("\nAll probabilities:")
