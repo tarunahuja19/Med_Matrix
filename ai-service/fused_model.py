@@ -42,9 +42,6 @@ class FusedS4CNNClassifier(nn.Module):
         self.dropout = nn.Dropout(0.3)
         self.head = nn.Linear(d_attn, num_classes)
         
-        # Temperature scaling parameter for calibration (Phase 1)
-        self.temperature = nn.Parameter(torch.ones(1))
-        
         self.d_attn = d_attn
         
     def forward(self, x: torch.Tensor, return_attention: bool = False) -> torch.Tensor:
@@ -84,49 +81,8 @@ class FusedS4CNNClassifier(nn.Module):
         # 6. Classification logits
         logits = self.head(self.dropout(f_pool)) # [B, num_classes]
         
-        # Apply temperature scaling in evaluation mode (calibration)
-        if not self.training:
-            logits = logits / self.temperature
-
         if return_attention:
             return logits, attn_weights
             
         return logits
-
-    def forward_with_uncertainty(self, x: torch.Tensor, n_samples: int = 10) -> tuple[torch.Tensor, torch.Tensor]:
-        """
-        Runs MC Dropout inference to estimate prediction probabilities and uncertainty.
-        
-        Args:
-            x: Input volume [B, S, C, H, W]
-            n_samples: Number of forward passes with active dropout
-            
-        Returns:
-            mean_probs: [B, num_classes] Mean predicted probabilities
-            entropy: [B] Predictive entropy (measure of uncertainty)
-        """
-        # Save training state and force dropout to be active
-        was_training = self.training
-        self.train()
-        # Keep other modules in eval mode to prevent running statistics update
-        self.s4_branch.eval()
-        self.cnn_branch.eval()
-        
-        logits_list = []
-        with torch.no_grad():
-            for _ in range(n_samples):
-                logits_list.append(self.forward(x))
-                
-        # Restore training state
-        self.train(was_training)
-        
-        # [n_samples, B, num_classes]
-        stacked = torch.stack(logits_list)
-        probs = torch.softmax(stacked, dim=-1) # [n_samples, B, num_classes]
-        
-        mean_probs = probs.mean(dim=0) # [B, num_classes]
-        entropy = -torch.sum(mean_probs * torch.log(mean_probs + 1e-8), dim=-1) # [B]
-        
-        return mean_probs, entropy
-
 

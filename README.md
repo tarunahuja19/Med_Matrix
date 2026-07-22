@@ -1,20 +1,19 @@
-# 🧠 MedMatrix
+# 🧠 MedMatrix (KVISION)
 
 [![C++ Inference Test Suite](https://img.shields.io/badge/C%2B%2B%20Inference-10%2F10%20Passed-success)](ai-service/inference)
 [![SSM Anomaly Test Suite](https://img.shields.io/badge/SSM%20Anomaly-9%2F9%20Passed-success)](ai-service/inference)
+[![Rust MRI Engine](https://img.shields.io/badge/Rust%20MRI-Reconstruction%20%26%20PDF-orange)](rust-mri)
 [![Node.js v20](https://img.shields.io/badge/Node.js-v20-blue)](apps/backend)
 [![Python 3.10](https://img.shields.io/badge/Python-3.10-blue)](ai-service)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-**KVISION** is a premium, monorepo-based clinical MRI volumetric analysis, anomaly detection, and automated reporting platform. It integrates state-of-the-art Deep Learning (Hybrid S4 State-Space Models + Spatial Convolutions) with high-performance native engines (C++ ONNX Runtime and Rust reconstruction routines) and a clinical desktop console (Electron + React) to deliver a seamless, high-throughput pipeline for radiologists.
+**MedMatrix** (also known as **KVISION**) is an enterprise-grade clinical MRI volumetric analysis, k-space anomaly detection, digital brain twin simulation, and automated reporting platform. Built inside a modular `pnpm` monorepo, it seamlessly couples state-of-the-art Deep Learning (Hybrid S4 State-Space Models + Spatial Convolutions) with high-performance native compute engines (C++ ONNX Runtime and Rust FFT reconstruction) and a Syngo-themed clinical desktop console (Electron + React).
 
 ---
 
 ## 🏛️ System Architecture & Workflow
 
-MedMatrix operates on an automated, two-tier AI cascade to optimize compute and preserve fine-grained structural details during MRI raw acquisition processing.
-
-👉 **[Read the Documentation](https://medmatrix.tarunahuja199.workers.dev/)**
+MedMatrix operates an automated, two-tier AI cascade to optimize compute budget while ensuring high diagnostic quality on raw multi-coil MRI acquisition streams.
 
 ```mermaid
 graph TD
@@ -43,24 +42,25 @@ graph TD
 
 ## 🚀 Key Features
 
-* **⚡ Two-Tier AI Gating Cascade:** Automatically identifies corrupted or artifact-heavy scans (ghosting, wrap-around, zipper noise) before executing intensive processing models. Clean scans bypass heavy models to preserve throughput.
-* **🧠 Hybrid S4-CNN Volumetric Classifier:** Combines a Diagonal State Space Model (S4D) sequence branch capturing frequency features in the complex domain with a spatial branch mapping reconstructed magnitude slices. Merged via Slice-Level Cross-Attention to classify 11 pathology classes.
-* **📈 SSM-Based K-Space Anomaly Estimator:** A State Space Model that ingests multi-coil complex K-space data row-by-row and outputs continuous regression metrics for noise, motion, and phase corruption.
-* **🚀 C++ ONNX Runtime Engine:** Native C++ implementations (`kvision::InferenceEngine` and `kvision::AnomalyDetectorEngine`) compiling with CMake, achieving up to 84.8 inferences/sec using CUDA GPU acceleration.
-* **🦀 Rust Reconstruction & PDF Compiler:** A native Rust module providing phase-corrected 2D IFFT slice reconstruction and a polished clinical PDF reporting engine.
-* **💻 Syngo-Themed Desktop App:** Electron desktop console styled after modern clinical Syngo design systems, hosting raw DICOM ingestion, database archiving, 2D slice viewers, and 3D volumetric visualizers.
+* **⚡ Two-Tier AI Gating Cascade:** Automatically detects hardware artifacts and scan corruption (ghosting, wrap-around, zipper noise) prior to heavy model execution. Clean scans bypass computationally expensive modules to maintain high patient throughput.
+* **🧠 Hybrid Fused S4-CNN Volumetric Classifier:** Merges complex-domain frequency sequence analysis (Diagonal State Space Model - S4D) with spatial magnitude slice representations via **Slice-Level Cross-Attention**. Achieves **88.28% validation accuracy** across 11 pathology classes with only **~281k parameters** (vs ~67M in traditional 3D CNNs).
+* **📈 SSM-Based K-Space Anomaly Estimator:** Real-valued diagonal State Space Model reading multi-coil raw complex K-space data row-by-row to predict continuous regression metrics for noise severity, motion blur, and phase corruption.
+* **🚀 C++ ONNX Runtime Engine:** Native C++ executables (`kvision::InferenceEngine` & `kvision::AnomalyDetectorEngine`) compiled with CMake and CUDA GPU support, achieving up to 84.8 inferences/second.
+* **🦀 Native Rust MRI Reconstruction & PDF Engine:** Phase-corrected 2D centered IFFT slice reconstruction module coupled with a high-speed, native clinical PDF report generator.
+* **💻 Syngo-Themed Clinical Desktop App:** Electron desktop console adhering to modern clinical Syngo UI design guidelines. Includes raw DICOM ingestion, Cornerstone3D multi-planar viewers, frequency domain k-space visualizers, and Digital Brain Twin node graphs.
+* **🧬 Synthetic Data & Phantom Generation (`data-gen`):** Complete Python simulation suite for generating multi-coil k-space arrays, numerical brain phantoms (PhantomNet), and benchmark pathology datasets.
 
 ---
 
 ## 📺 UI/UX Clinical Showcase
 
 ### 1. 3D Volumetric Brain & Lesion Visualizer
-Provides a real-time, interactive 3D mesh rendering of patient brains, overlaying detected tumor models, hemorrhage volumes, and lesion nodes in three dimensions using Three.js and VTK.js.
+Provides interactive 3D mesh renderings overlaying tumor volumes, hemorrhage regions, and lesion nodes using Three.js and VTK.js.
 
 ![3D Brain Visualizer Interface](assets/3d_visualizer_showcase.png)
 
 ### 2. 2D Clinical Slice Viewer
-A clinical-grade multi-planar slice viewer powered by Cornerstone3D, allowing radiologists to scroll through reconstructed axial, sagittal, and coronal slices, overlaying segmentation masks and AI-detected pathology logits.
+Multi-planar slice viewer powered by Cornerstone3D, featuring seamless scrolling across axial, sagittal, and coronal slice planes with AI segmentation overlays.
 
 #### Spatial Domain (Reconstructed MRI Slice)
 ![2D Clinical Slice Viewer Interface](assets/2d_slice_viewer_showcase.png)
@@ -72,32 +72,31 @@ A clinical-grade multi-planar slice viewer powered by Cornerstone3D, allowing ra
 
 ## 🗺️ Monorepo Navigation Dashboard
 
-The MedMatrix codebase is structured as a monorepo managed with `pnpm` workspaces. Click any of the links below to view the detailed folder documentation:
+The MedMatrix repository is organized as a workspace monorepo managed with `pnpm`.
 
 ```
 Med_Matrix/
 ├── 🐳 docker-compose.yml        <- Infrastructure orchestration (Postgres, Redis, MinIO)
 ├── 🤖 ai-service/                <- Python FastAPI + PyTorch AI microservice
-│   └── ⚙️ inference/               <- C++ ONNX Runtime Inference Engine (CMake)
+│   └── ⚙️ inference/             <- C++ ONNX Runtime Inference Engine (CMake)
 ├── 📱 apps/
-│   ├── 🖥️ electron/             <- Electron + React + TypeScript clinical app
-│   └── 🌐 backend/              <- Node.js Express server + Prisma ORM + BullMQ queue
-├── 🦀 rust-mri/                  <- High-speed Rust reconstruction & PDF generator
-├── 📦 packages/
-│   ├── ⚙️ config/               <- Shared ESLint, Prettier, and TypeScript configurations
-│   └── 🧩 shared-types/         <- Shared TS interfaces across electron and backend
-└── 🧠 second-brain/              <- Obsidian-compatible developer vault for memory tracking
+│   ├── 🖥️ electron/             <- Electron + React + TypeScript clinical desktop application
+│   └── 🌐 backend/              <- Node.js Express server + Prisma ORM + BullMQ worker
+├── 🧬 data-gen/                 <- Synthetic MRI & PhantomNet data generator
+├── 🦀 rust-mri/                  <- High-speed Rust reconstruction & PDF compiler
+└── 📦 packages/
+    ├── ⚙️ config/               <- Shared ESLint, Prettier, and TypeScript configurations
+    └── 🧩 shared-types/         <- Shared TypeScript interfaces across client and backend
 ```
 
-### 🗂️ Documentation Quick Links:
-* **[Root README](README.md)** (this file)
-* **[ai-service/README.md](ai-service/README.md)** — Python AI microservice, PyTorch pipelines, and model details.
+### 🗂️ Module Documentation Links:
+* **[ai-service/README.md](ai-service/README.md)** — Python AI microservice, PyTorch architectures, and FastAPI endpoints.
 * **[ai-service/inference/README.md](ai-service/inference/README.md)** — High-performance C++ ONNX Runtime engine & builds.
-* **[apps/backend/README.md](apps/backend/README.md)** — Express REST API, Prisma schema, PostgreSQL DB, and BullMQ worker.
-* **[apps/electron/README.md](apps/electron/README.md)** — Desktop UI client main/preload/renderer structure and visualizations.
-* **[rust-mri/README.md](rust-mri/README.md)** — Native Rust FFT slice reconstructions and PDF report compiler.
-* **[packages/README.md](packages/README.md)** — Shared configurations and common type interfaces index.
-* **[second-brain/README.md](second-brain/README.md)** — Obsidian vault documentation index and developer logs.
+* **[apps/backend/README.md](apps/backend/README.md)** — Express REST API, Prisma ORM schema, PostgreSQL DB, and BullMQ worker queues.
+* **[apps/electron/README.md](apps/electron/README.md)** — Electron desktop UI client structure, Cornerstone3D, and Digital Brain Twin components.
+* **[data-gen/README.md](data-gen/README.md)** — Synthetic MRI k-space generation and PhantomNet phantom pipeline.
+* **[rust-mri/README.md](rust-mri/README.md)** — Native Rust FFT slice reconstruction and PDF report compiler.
+* **[packages/README.md](packages/README.md)** — Shared configurations and TypeScript types index.
 
 ---
 
@@ -108,78 +107,104 @@ Med_Matrix/
 * **Node.js**: v20+ and **pnpm** installed globally (`npm install -g pnpm`)
 * **Python**: v3.10+ with `pip`
 * **Docker & Compose**: For running backing database and storage services
-* **C++ Compiler**: GCC 16+ or Clang, CMake 3.18+, pkg-config
+* **C++ Compiler**: GCC / Clang, CMake 3.18+, pkg-config
 * **Rust**: Cargo and rustc (edition 2021)
-* **ONNX Runtime C++ Shared Libraries**: Installed via system package manager (e.g. `onnxruntime-cuda` on Arch/EndeavourOS)
+* **ONNX Runtime C++ Shared Libraries**: Installed on host system (e.g. `onnxruntime-cuda`)
 
-### 1. Ingest Backing Services (Docker)
-Start the PostgreSQL, Redis, and MinIO storage containers:
+---
+
+### 1. Start Backing Infrastructure (Docker)
+Launch PostgreSQL, Redis, and MinIO storage containers:
 ```bash
 docker-compose up -d
 ```
-Verify containers are running:
-* **PostgreSQL**: `localhost:5432`
+Service ports:
+* **PostgreSQL**: `localhost:5432` (database: `medmatrix`)
 * **Redis**: `localhost:6379`
-* **MinIO Console**: `localhost:9001` (S3 API at `localhost:9000`)
+* **MinIO Console**: `localhost:9001` (S3 API: `localhost:9000`)
+
+---
 
 ### 2. Configure Environment Variables
-Copy the root env example:
+Copy the root environment template:
 ```bash
 cp .env.example .env
 ```
-Ensure configurations match your local development environment credentials.
+Ensure DB, Redis, and MinIO credentials align with your local configuration.
 
-### 3. Initialize Monorepo Packages
-Install Node dependencies and generate the Prisma database client:
+---
+
+### 3. Initialize Monorepo & Database Schema
+Install Node dependencies and synchronize the Prisma database schema:
 ```bash
 pnpm install
 cd apps/backend
-npx prisma db push  # Applies schema to the database
+npx prisma db push
 cd ../..
 ```
 
-### 4. Set Up Python AI Service
-Initialize a Python virtual environment and install packages:
+---
+
+### 4. Set Up Python AI Microservice
+Create a virtual environment and install requirements:
 ```bash
 cd ai-service
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
-To run the FastAPI server:
+To launch the FastAPI service on port 8000:
 ```bash
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
+API Documentation will be accessible at [http://localhost:8000/docs](http://localhost:8000/docs).
 
-### 5. Compile C++ Inference Engine
-To compile the high-performance inference engine:
+---
+
+### 5. Compile C++ ONNX Inference Engine
+Build the high-throughput native C++ inference engine:
 ```bash
 cd ai-service/inference
 mkdir -p build && cd build
 cmake -DCMAKE_BUILD_TYPE=Release ..
 make -j$(nproc)
 ```
-Run the validation tests:
+Run validation unit tests:
 ```bash
 ./test_inference
 ./test_anomaly_detector_inference
 ```
 
-### 6. Build the Rust MRI Module
-To compile the Rust reconstruction binary and PDF generator:
+---
+
+### 6. Build Native Rust MRI Engine
+Compile the Rust slice reconstruction binary and PDF generator:
 ```bash
 cd rust-mri
 cargo build --release
 ```
 
-### 7. Run the Express Backend
-From the root directory, start the backend application in development mode (which initiates the BullMQ job worker):
+---
+
+### 7. Run Synthetic Data Generators (Optional)
+To synthesize demo patients and phantom previews:
+```bash
+python data-gen/generate_demo_patients.py
+python data-gen/generate_phantomnet_demo.py
+```
+
+---
+
+### 8. Run Express Backend
+From the monorepo root, start the backend server and BullMQ processing worker:
 ```bash
 pnpm --filter backend dev
 ```
 
-### 8. Run the Electron GUI
-Launch the desktop console:
+---
+
+### 9. Launch Electron Desktop GUI
+Launch the Electron clinical console:
 ```bash
 pnpm --filter electron dev
 ```

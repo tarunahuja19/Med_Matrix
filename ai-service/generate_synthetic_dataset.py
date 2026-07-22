@@ -41,11 +41,24 @@ def generate_quantitative_maps(size: int, slice_idx: int, num_slices: int, categ
     import scipy.ndimage
 
     mat_path = os.path.join(os.path.dirname(__file__), "numerical_brain_cropped.mat")
-    if not os.path.exists(mat_path):
-        mat_path = "numerical_brain_cropped.mat"
+    if os.path.exists(mat_path):
+        mat = scipy.io.loadmat(mat_path)
+        raw_brain = mat['cropped_brain'] # shape (141, 161, 5)
+    else:
+        # Fallback synthetic 3D numerical brain array if .mat file is missing from git repo
+        raw_brain = np.zeros((141, 161, 5), dtype=np.float32)
+        y_g, x_g = np.ogrid[-1:1:141j, -1:1:161j]
+        brain_mask = (x_g**2 / 0.65**2 + y_g**2 / 0.78**2) <= 1.0
+        wm_mask = (x_g**2 / 0.50**2 + y_g**2 / 0.60**2) <= 1.0
+        v1 = ((x_g - 0.12)**2 / 0.08**2 + (y_g - 0.05)**2 / 0.28**2) <= 1.0
+        v2 = ((x_g + 0.12)**2 / 0.08**2 + (y_g - 0.05)**2 / 0.28**2) <= 1.0
+        csf_mask = (v1 | v2) & brain_mask
         
-    mat = scipy.io.loadmat(mat_path)
-    raw_brain = mat['cropped_brain'] # shape (141, 161, 5)
+        # Channel 0: PD, Channel 1: T1 (sec), Channel 2: T2 (sec), Channel 3: B0
+        raw_brain[..., 0] = np.where(csf_mask, 1.0, np.where(wm_mask, 0.70, np.where(brain_mask, 0.85, 0.0)))
+        raw_brain[..., 1] = np.where(csf_mask, 4.2, np.where(wm_mask, 0.80, np.where(brain_mask, 1.40, 0.001)))
+        raw_brain[..., 2] = np.where(csf_mask, 2.0, np.where(wm_mask, 0.07, np.where(brain_mask, 0.09, 0.001)))
+        raw_brain[..., 3] = 0.0
     
     # Extract 2D channel maps
     pd_raw = raw_brain[..., 0]

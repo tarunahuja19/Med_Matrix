@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import DigitalBrainTwinView from './components/DigitalBrainTwin'
+import BmNodeUQView from './components/BmNodeUQ'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -78,7 +79,7 @@ interface ProgressionResponse {
 }
 
 // ── Tabs ─────────────────────────────────────────────────────────────────────
-type Tab = 'ingest' | 'archive' | 'patients' | 'reports' | 'brain3d' | 'twin' | 'analytics'
+type Tab = 'ingest' | 'archive' | 'patients' | 'reports' | 'brain3d' | 'twin' | 'analytics' | 'cest'
 
 const SIMULATED_DISEASES = [
   'Normal',
@@ -2796,6 +2797,7 @@ export default function App() {
     { id: 'brain3d', label: '3D Brain Model' },
     { id: 'twin', label: 'Digital Brain Twin' },
     { id: 'analytics', label: 'Analytics' },
+    { id: 'cest', label: 'CEST Quantification' },
   ]
 
   return (
@@ -4202,6 +4204,11 @@ export default function App() {
               </div>
             </div>
           </>
+        )}
+
+        {/* ═══════════════════════════════════ CEST QUANTIFICATION TAB ══════════════════════════════════ */}
+        {tab === 'cest' && (
+          <BmNodeUQView />
         )}
 
         {/* ═══════════════════════════════════ DIGITAL BRAIN TWIN TAB ══════════════════════════════════ */}

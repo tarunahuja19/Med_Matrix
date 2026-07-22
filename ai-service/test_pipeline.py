@@ -7,9 +7,10 @@ from fastapi.testclient import TestClient
 
 # Mock the Minio client connection during import to prevent connection errors
 with patch("minio.Minio") as mock_minio:
-    from main import app
-    import services.minio_service
-    services.minio_service.minio_client = MagicMock()
+    from main import app, minio_client
+    # Set the mocked client on the app module
+    import main
+    main.minio_client = MagicMock()
 
 from kspace_reader import generate_synthetic_kspace
 
@@ -57,9 +58,9 @@ def test_reconstruct_endpoint_integration():
             assert data.shape == (slices, 256, 256)
             uploaded_files[object_name] = data
 
-        # Apply mocks to the services.minio_service.minio_client
-        services.minio_service.minio_client.fget_object = mock_fget_object
-        services.minio_service.minio_client.fput_object = mock_fput_object
+        # Apply mocks to the main.minio_client
+        main.minio_client.fget_object = mock_fget_object
+        main.minio_client.fput_object = mock_fput_object
 
         # Prepare request payload
         payload = {
@@ -98,7 +99,7 @@ def test_reconstruct_endpoint_invalid_file():
         with open(file_path, "w") as f:
             f.write("completely_invalid_garbage_data")
 
-    services.minio_service.minio_client.fget_object = mock_fget_object
+    main.minio_client.fget_object = mock_fget_object
 
     payload = {
         "study_id": "test-study-uuid-12345",
@@ -110,7 +111,7 @@ def test_reconstruct_endpoint_invalid_file():
     response = client.post("/reconstruct", json=payload)
     # The endpoint should return 422 Unprocessable Entity due to parsing failure
     assert response.status_code == 422
-    assert "Failed to parse K-space" in response.json()["detail"]
+    assert "Failed to parse K-space file format" in response.json()["detail"]
 
 
 def test_reconstruct_endpoint_minio_error():
@@ -118,7 +119,7 @@ def test_reconstruct_endpoint_minio_error():
     def mock_fget_object(bucket_name, object_name, file_path):
         raise Exception("NoSuchKey: The specified key does not exist.")
 
-    services.minio_service.minio_client.fget_object = mock_fget_object
+    main.minio_client.fget_object = mock_fget_object
 
     payload = {
         "study_id": "test-study-uuid-12345",
@@ -159,8 +160,8 @@ def test_predict_endpoint_with_kspace_explainability():
         def mock_fput_object(bucket_name, object_name, file_path):
             uploaded_files[object_name] = np.load(file_path)
 
-        services.minio_service.minio_client.fget_object = mock_fget_object
-        services.minio_service.minio_client.fput_object = mock_fput_object
+        main.minio_client.fget_object = mock_fget_object
+        main.minio_client.fput_object = mock_fput_object
 
         # Prepare request payload for /predict
         payload = {
