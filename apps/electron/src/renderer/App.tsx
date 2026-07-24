@@ -59,6 +59,10 @@ interface AIFindings {
   noiseSeverity?: number
   motionSeverity?: number
   phaseSeverity?: number
+  snr?: number
+  cnr?: number
+  snrQuality?: string
+  cnrQuality?: string
 }
 
 interface ProgressionPoint {
@@ -504,6 +508,262 @@ function renderSlice(
   }
 
   ctx.putImageData(imgData, 0, 0)
+}
+
+// ── Quantitative MRI Metrics Panel ──────────────────────────────────────────
+
+function QualityBadge({ label }: { label: string }) {
+  const colors: Record<string, { bg: string; text: string; border: string }> = {
+    Excellent: { bg: 'rgba(16,185,129,0.15)', text: '#10b981', border: 'rgba(16,185,129,0.4)' },
+    Good:      { bg: 'rgba(59,130,246,0.15)', text: '#3b82f6', border: 'rgba(59,130,246,0.4)' },
+    Fair:      { bg: 'rgba(245,158,11,0.15)', text: '#f59e0b', border: 'rgba(245,158,11,0.4)' },
+    Poor:      { bg: 'rgba(239,68,68,0.15)',  text: '#ef4444', border: 'rgba(239,68,68,0.4)' },
+  }
+  const c = colors[label] ?? colors.Poor
+  return (
+    <span style={{
+      display: 'inline-block',
+      padding: '2px 8px',
+      borderRadius: '10px',
+      fontSize: '10px',
+      fontWeight: 700,
+      letterSpacing: '0.04em',
+      textTransform: 'uppercase',
+      background: c.bg,
+      color: c.text,
+      border: `1px solid ${c.border}`,
+      fontFamily: 'var(--font-mono)',
+    }}>
+      {label}
+    </span>
+  )
+}
+
+function MetricArc({
+  value,
+  max,
+  label,
+  unit,
+  quality,
+  description,
+}: {
+  value: number
+  max: number
+  label: string
+  unit: string
+  quality: string
+  description: string
+}) {
+  const fraction = Math.min(value / max, 1)
+  const qualColors: Record<string, string> = {
+    Excellent: '#10b981',
+    Good:      '#3b82f6',
+    Fair:      '#f59e0b',
+    Poor:      '#ef4444',
+  }
+  const color = qualColors[quality] ?? '#6b7280'
+
+  // SVG arc parameters
+  const R = 36
+  const cx = 52, cy = 52
+  const startAngle = -210   // degrees, going CCW from bottom-left
+  const sweepTotal = 240    // degrees of arc
+  const toRad = (d: number) => (d * Math.PI) / 180
+  const arcX = (angle: number) => cx + R * Math.cos(toRad(angle))
+  const arcY = (angle: number) => cy + R * Math.sin(toRad(angle))
+
+  const bgEnd = startAngle + sweepTotal
+  const fgEnd = startAngle + sweepTotal * fraction
+
+  // Arc path helper (SVG large-arc flag)
+  const arcPath = (a1: number, a2: number, radius: number) => {
+    const x1 = cx + radius * Math.cos(toRad(a1))
+    const y1 = cy + radius * Math.sin(toRad(a1))
+    const x2 = cx + radius * Math.cos(toRad(a2))
+    const y2 = cy + radius * Math.sin(toRad(a2))
+    const large = Math.abs(a2 - a1) > 180 ? 1 : 0
+    return `M ${x1} ${y1} A ${radius} ${radius} 0 ${large} 1 ${x2} ${y2}`
+  }
+
+  return (
+    <div style={{
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      gap: '6px',
+      flex: 1,
+      minWidth: '140px',
+    }}>
+      <svg width="104" height="80" viewBox="0 0 104 80" style={{ overflow: 'visible' }}>
+        {/* Track arc */}
+        <path
+          d={arcPath(startAngle, bgEnd, R)}
+          fill="none"
+          stroke="#d1d5db"
+          strokeWidth="7"
+          strokeLinecap="round"
+        />
+        {/* Value arc */}
+        {fraction > 0 && (
+          <path
+            d={arcPath(startAngle, fgEnd, R)}
+            fill="none"
+            stroke={color}
+            strokeWidth="7"
+            strokeLinecap="round"
+            style={{ filter: `drop-shadow(0 0 3px ${color}88)` }}
+          />
+        )}
+        {/* Centre value text */}
+        <text x={cx} y={cy - 2} textAnchor="middle" fontSize="13" fontWeight="700" fill="#1a202c" fontFamily="monospace">
+          {value.toFixed(1)}
+        </text>
+        <text x={cx} y={cy + 11} textAnchor="middle" fontSize="8" fill="#6b7280" fontFamily="monospace">
+          {unit}
+        </text>
+      </svg>
+
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 700, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+        {label}
+      </div>
+      <QualityBadge label={quality} />
+      <div style={{ fontSize: '10px', color: '#6b7280', textAlign: 'center', lineHeight: '1.4', maxWidth: '130px' }}>
+        {description}
+      </div>
+    </div>
+  )
+}
+
+function QuantitativeMRIMetricsPanel({
+  snr,
+  cnr,
+  snrQuality,
+  cnrQuality,
+}: {
+  snr?: number | null
+  cnr?: number | null
+  snrQuality?: string | null
+  cnrQuality?: string | null
+}) {
+  if (snr == null && cnr == null) return null
+
+  const snrMax = 40   // clinical reference max for display
+  const cnrMax = 12   // clinical reference max for display
+
+  return (
+    <div style={{
+      border: '1px solid var(--color-panel-border)',
+      borderRadius: '4px',
+      background: 'linear-gradient(135deg, #f0f7ff 0%, #f8fafc 60%, #fff9f0 100%)',
+      padding: '16px',
+      boxShadow: '0 2px 8px rgba(59,130,246,0.07)',
+    }}>
+      {/* Header */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: '14px',
+      }}>
+        <div>
+          <div style={{
+            fontSize: '11px',
+            fontWeight: 700,
+            color: 'var(--color-accent-blue)',
+            textTransform: 'uppercase',
+            letterSpacing: '0.08em',
+          }}>
+            ◈ Quantitative MRI Metrics
+          </div>
+          <div style={{ fontSize: '10px', color: '#6b7280', marginTop: '2px' }}>
+            Auto-estimated from central signal & background corner ROIs
+          </div>
+        </div>
+        <div style={{
+          fontSize: '9px',
+          fontFamily: 'var(--font-mono)',
+          color: '#9ca3af',
+          textAlign: 'right',
+          lineHeight: '1.5',
+        }}>
+          <div>NEMA MS-1 Method</div>
+          <div>3T Reference</div>
+        </div>
+      </div>
+
+      {/* Gauge row */}
+      <div style={{
+        display: 'flex',
+        gap: '12px',
+        justifyContent: 'space-around',
+        flexWrap: 'wrap',
+        marginBottom: '14px',
+      }}>
+        {snr != null && (
+          <MetricArc
+            value={snr}
+            max={snrMax}
+            label="SNR"
+            unit="(a.u.)"
+            quality={snrQuality ?? 'Poor'}
+            description="Signal tissue mean ÷ background noise σ"
+          />
+        )}
+        {cnr != null && (
+          <MetricArc
+            value={cnr}
+            max={cnrMax}
+            label="CNR"
+            unit="(a.u.)"
+            quality={cnrQuality ?? 'Poor'}
+            description="|Signal − Contrast| ÷ noise σ"
+          />
+        )}
+      </div>
+
+      {/* Reference thresholds legend */}
+      <div style={{
+        borderTop: '1px solid #e5e7eb',
+        paddingTop: '10px',
+        display: 'grid',
+        gridTemplateColumns: '1fr 1fr',
+        gap: '6px 16px',
+      }}>
+        {[
+          { label: 'SNR ≥ 20', grade: 'Excellent' },
+          { label: 'CNR ≥ 5',  grade: 'Excellent' },
+          { label: 'SNR 10–20', grade: 'Good' },
+          { label: 'CNR 2.5–5', grade: 'Good' },
+          { label: 'SNR 5–10', grade: 'Fair' },
+          { label: 'CNR 1–2.5', grade: 'Fair' },
+          { label: 'SNR < 5',  grade: 'Poor' },
+          { label: 'CNR < 1',  grade: 'Poor' },
+        ].map(({ label, grade }) => (
+          <div key={label} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <QualityBadge label={grade} />
+            <span style={{ fontSize: '10px', fontFamily: 'var(--font-mono)', color: '#4b5563' }}>{label}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Clinical note */}
+      <div style={{
+        marginTop: '10px',
+        padding: '8px 10px',
+        background: 'rgba(59,130,246,0.06)',
+        borderRadius: '4px',
+        border: '1px solid rgba(59,130,246,0.15)',
+        fontSize: '10px',
+        color: '#374151',
+        lineHeight: '1.5',
+      }}>
+        <strong style={{ color: '#1d4ed8' }}>Clinical Note:</strong>{' '}
+        SNR and CNR are primary quality indicators for diagnostic MRI. SNR ≥ 10 ensures adequate tissue
+        contrast; CNR ≥ 2.5 supports lesion delineation. Values are auto-computed without manual ROI
+        placement — clinician ROI override is recommended for formal reporting.
+      </div>
+    </div>
+  )
 }
 
 function ClinicalMRIViewer({
@@ -3382,6 +3642,26 @@ export default function App() {
                             <KSpaceGradCAMViewer studyId={selectedStudy.id} />
                           </div>
 
+                          {/* Quantitative MRI Metrics panel */}
+                          {(() => {
+                            const studyReport2 = reports.find((rp) => rp.studyId === selectedStudy.id)
+                            const f2 = parseFindings(studyReport2?.findings ?? null)
+                            if (!f2 || (f2.snr == null && f2.cnr == null)) return null
+                            return (
+                              <div>
+                                <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text-dim)', textTransform: 'uppercase', marginBottom: '8px' }}>
+                                  Image Quality Metrics (SNR / CNR)
+                                </div>
+                                <QuantitativeMRIMetricsPanel
+                                  snr={f2.snr}
+                                  cnr={f2.cnr}
+                                  snrQuality={f2.snrQuality}
+                                  cnrQuality={f2.cnrQuality}
+                                />
+                              </div>
+                            )
+                          })()}
+
                           <div>
                             <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text-dim)', textTransform: 'uppercase', marginBottom: '8px' }}>
                               Spatial & Morphological Metrics
@@ -3916,6 +4196,21 @@ export default function App() {
                                 K-Space Explainability (Grad-CAM Overlay)
                               </div>
                               <KSpaceGradCAMViewer studyId={selectedReport.studyId} />
+                            </div>
+                          )}
+
+                          {/* Quantitative MRI Metrics panel (Reports tab) */}
+                          {selectedReport.study?.status === 'complete' && f && (f.snr != null || f.cnr != null) && (
+                            <div style={{ border: '1px solid var(--color-panel-border)', padding: '12px', background: '#f5f7f8' }}>
+                              <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text-dim)', textTransform: 'uppercase', marginBottom: '8px' }}>
+                                Image Quality Metrics (SNR / CNR)
+                              </div>
+                              <QuantitativeMRIMetricsPanel
+                                snr={f.snr}
+                                cnr={f.cnr}
+                                snrQuality={f.snrQuality}
+                                cnrQuality={f.cnrQuality}
+                              />
                             </div>
                           )}
 

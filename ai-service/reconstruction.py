@@ -184,3 +184,121 @@ def reconstruct_kspace(kspace: np.ndarray, phase_correction: bool = True) -> np.
         combined = np.squeeze(combined)  # [height, width]
         
     return combined
+
+
+def compute_snr_cnr(
+    img: np.ndarray,
+    signal_roi: np.ndarray | None = None,
+    noise_roi: np.ndarray | None = None,
+    contrast_roi: np.ndarray | None = None,
+) -> dict:
+    """
+    Computes Signal-to-Noise Ratio (SNR) and Contrast-to-Noise Ratio (CNR)
+    from a reconstructed MRI magnitude image.
+
+    If no ROI masks are provided the function uses automatic estimation:
+      - Signal ROI : central 20% of the image (expected to contain brain tissue).
+      - Noise ROI  : four 10%-wide corners of the image (expected background).
+      - Contrast ROI: central 10% ring around the signal ROI (peri-lesional tissue).
+
+    Parameters
+    ----------
+    img : np.ndarray
+        2-D magnitude image [H, W] or 3-D volume [slices, H, W].  For 3-D
+        input the middle slice is used for metric computation.
+    signal_roi : np.ndarray | None
+        Boolean mask the same spatial size as img (or the selected 2-D slice)
+        indicating the primary signal region.
+    noise_roi : np.ndarray | None
+        Boolean mask for the background / noise region.
+    contrast_roi : np.ndarray | None
+        Boolean mask for a secondary tissue region used in CNR computation.
+
+    Returns
+    -------
+    dict with keys:
+        snr (float)           : Signal-to-Noise Ratio
+        cnr (float)           : Contrast-to-Noise Ratio
+        mean_signal (float)   : Mean pixel intensity of signal ROI
+        std_noise (float)     : Standard deviation of noise ROI
+        mean_contrast (float) : Mean pixel intensity of contrast ROI
+        snr_quality (str)     : Qualitative label ("Excellent"/"Good"/"Fair"/"Poor")
+        cnr_quality (str)     : Qualitative label ("Excellent"/"Good"/"Fair"/"Poor")
+    """
+    # Select the 2-D working slice
+    if img.ndim == 3:
+        working = img[img.shape[0] // 2].astype(np.float64)
+    elif img.ndim == 2:
+        working = img.astype(np.float64)
+    else:
+        raise ValueError(f"Expected 2-D or 3-D array, got shape {img.shape}")
+
+    H, W = working.shape
+
+    # ── Build default ROIs if none are supplied ─────────────────────────────
+    if signal_roi is None:
+        # Central 20% box — expected to cover brain parenchyma
+        h0, h1 = int(H * 0.40), int(H * 0.60)
+        w0, w1 = int(W * 0.40), int(W * 0.60)
+        signal_roi = np.zeros((H, W), dtype=bool)
+        signal_roi[h0:h1, w0:w1] = True
+
+    if noise_roi is None:
+        # Four 10%-wide corners — expected to be background / air
+        corner_h = max(1, int(H * 0.10))
+        corner_w = max(1, int(W * 0.10))
+        noise_roi = np.zeros((H, W), dtype=bool)
+        noise_roi[:corner_h, :corner_w] = True          # top-left
+        noise_roi[:corner_h, -corner_w:] = True         # top-right
+        noise_roi[-corner_h:, :corner_w] = True         # bottom-left
+        noise_roi[-corner_h:, -corner_w:] = True        # bottom-right
+
+    if contrast_roi is None:
+        # Peri-central 10% annular ring (between 25% and 35% from centre)
+        ch, cw = H // 2, W // 2
+        contrast_roi = np.zeros((H, W), dtype=bool)
+        inner_h0, inner_h1 = int(H * 0.35), int(H * 0.65)
+        inner_w0, inner_w1 = int(W * 0.35), int(W * 0.65)
+        outer_h0, outer_h1 = int(H * 0.25), int(H * 0.75)
+        outer_w0, outer_w1 = int(W * 0.25), int(W * 0.75)
+        contrast_roi[outer_h0:outer_h1, outer_w0:outer_w1] = True
+        contrast_roi[inner_h0:inner_h1, inner_w0:inner_w1] = False  # punch hole
+
+    signal_pixels = working[signal_roi]
+    noise_pixels = working[noise_roi]
+    contrast_pixels = working[contrast_roi]
+
+    # Guard against empty ROIs
+    mean_signal = float(np.mean(signal_pixels)) if signal_pixels.size > 0 else 0.0
+    std_noise = float(np.std(noise_pixels)) if noise_pixels.size > 0 else 1e-9
+    mean_contrast = float(np.mean(contrast_pixels)) if contrast_pixels.size > 0 else 0.0
+
+    # Avoid divide-by-zero
+    if std_noise < 1e-9:
+        std_noise = 1e-9
+
+    snr = mean_signal / std_noise
+    cnr = abs(mean_signal - mean_contrast) / std_noise
+
+    # Qualitative grading (clinical thresholds for brain MRI at 3T)
+    def _snr_grade(v: float) -> str:
+        if v >= 20:  return "Excellent"
+        if v >= 10:  return "Good"
+        if v >= 5:   return "Fair"
+        return "Poor"
+
+    def _cnr_grade(v: float) -> str:
+        if v >= 5:   return "Excellent"
+        if v >= 2.5: return "Good"
+        if v >= 1:   return "Fair"
+        return "Poor"
+
+    return {
+        "snr": round(snr, 2),
+        "cnr": round(cnr, 2),
+        "mean_signal": round(mean_signal, 4),
+        "std_noise": round(std_noise, 4),
+        "mean_contrast": round(mean_contrast, 4),
+        "snr_quality": _snr_grade(snr),
+        "cnr_quality": _cnr_grade(cnr),
+    }

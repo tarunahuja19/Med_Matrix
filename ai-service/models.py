@@ -91,7 +91,12 @@ class PredictResponse(BaseModel):
     noise_severity: Optional[float] = Field(default=None, description="Estimated noise severity")
     motion_severity: Optional[float] = Field(default=None, description="Estimated motion severity")
     phase_severity: Optional[float] = Field(default=None, description="Estimated phase severity")
+    snr: Optional[float] = Field(default=None, description="Signal-to-Noise Ratio computed from reconstructed image")
+    cnr: Optional[float] = Field(default=None, description="Contrast-to-Noise Ratio computed from reconstructed image")
+    snr_quality: Optional[str] = Field(default=None, description="Qualitative SNR grade: Excellent / Good / Fair / Poor")
+    cnr_quality: Optional[str] = Field(default=None, description="Qualitative CNR grade: Excellent / Good / Fair / Poor")
     message: Optional[str] = None
+
 
 
 # ---------------------------------------------------------------------------

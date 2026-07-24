@@ -70,10 +70,15 @@ async function processStudy(job: Job<StudyJobData>): Promise<void> {
     noiseSeverity: inferenceResult.noiseSeverity,
     motionSeverity: inferenceResult.motionSeverity,
     phaseSeverity: inferenceResult.phaseSeverity,
+    snr: inferenceResult.snr,
+    cnr: inferenceResult.cnr,
+    snrQuality: inferenceResult.snrQuality,
+    cnrQuality: inferenceResult.cnrQuality,
     note: inferenceResult.anomalyDetected
       ? undefined
       : 'K-Space anomaly score below threshold — image encoder not triggered.',
   })
+
 
   // ── 80%: Query RAG Reporting Agent and Create draft report ────────────────
   const study = await prisma.study.findUnique({

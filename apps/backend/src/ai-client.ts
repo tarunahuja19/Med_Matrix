@@ -57,6 +57,10 @@ export interface PredictResponse {
   noise_severity: number | null
   motion_severity: number | null
   phase_severity: number | null
+  snr: number | null
+  cnr: number | null
+  snr_quality: string | null
+  cnr_quality: string | null
   message: string | null
 }
 
@@ -79,6 +83,10 @@ export interface AIInferenceResult {
   noiseSeverity: number | null
   motionSeverity: number | null
   phaseSeverity: number | null
+  snr: number | null
+  cnr: number | null
+  snrQuality: string | null
+  cnrQuality: string | null
 }
 
 // ---------------------------------------------------------------------------
@@ -210,6 +218,10 @@ export class AIServiceClient {
       noiseSeverity: data.noise_severity ?? null,
       motionSeverity: data.motion_severity ?? null,
       phaseSeverity: data.phase_severity ?? null,
+      snr: data.snr ?? null,
+      cnr: data.cnr ?? null,
+      snrQuality: data.snr_quality ?? null,
+      cnrQuality: data.cnr_quality ?? null,
     }
   }
 

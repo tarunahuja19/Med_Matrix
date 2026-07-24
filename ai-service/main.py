@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from minio import Minio
 
 from kspace_reader import load_kspace
-from reconstruction import reconstruct_kspace
+from reconstruction import reconstruct_kspace, compute_snr_cnr
 from motion_correction import correct_motion
 from denoiser import denoise_image
 from artifact_detector import detect_artifacts
@@ -905,6 +905,37 @@ def predict(request: PredictRequest):
         except Exception as e:
             logger.error(f"[predict] K-Space Anomaly Estimator failed: {e}")
 
+        # ── Step 6d: Quantitative MRI Metrics (SNR / CNR) ───────────────────
+        snr_value = None
+        cnr_value = None
+        snr_quality_label = None
+        cnr_quality_label = None
+
+        try:
+            logger.info("[predict] Computing SNR/CNR from reconstructed image...")
+            # Use the best available image: denoised if pipeline ran, else base reconstruction
+            metrics_img = None
+            if anomaly_detected:
+                try:
+                    metrics_img = np.load(local_reconstructed_path)
+                except Exception:
+                    metrics_img = reconstructed  # fallback to base recon
+            else:
+                metrics_img = reconstructed
+
+            if metrics_img is not None:
+                qmetrics = compute_snr_cnr(metrics_img)
+                snr_value = qmetrics["snr"]
+                cnr_value = qmetrics["cnr"]
+                snr_quality_label = qmetrics["snr_quality"]
+                cnr_quality_label = qmetrics["cnr_quality"]
+                logger.info(
+                    f"[predict] SNR={snr_value:.2f} ({snr_quality_label}), "
+                    f"CNR={cnr_value:.2f} ({cnr_quality_label})"
+                )
+        except Exception as e:
+            logger.error(f"[predict] SNR/CNR computation failed: {e}")
+
         # ── Step 7: Return response ────────────────────────────────────────
         return PredictResponse(
             status="success",
@@ -922,6 +953,10 @@ def predict(request: PredictRequest):
             noise_severity=noise_severity,
             motion_severity=motion_severity,
             phase_severity=phase_severity,
+            snr=snr_value,
+            cnr=cnr_value,
+            snr_quality=snr_quality_label,
+            cnr_quality=cnr_quality_label,
             message=reason,
         )
 
